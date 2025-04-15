@@ -3,6 +3,6 @@ requests==2.31.0
 opencv-python==4.8.1.78
 numpy==1.26.4
 tensorflow-cpu==2.15.0
-urllib3==2.0.7
+urllib3==1.26.18
 boto3==1.34.0
 gunicorn==22.0.0  # Optional, for Flask if you add a web server
