@@ -114,7 +114,7 @@ cameras = [
 # Paths for models and output
 road_model_path = "unet_road_segmentation (Better).keras"
 vehicle_model_path = "unet_multi_classV1.keras"
-base_directory = r"E:\playground\flutter_playground_vsc\flutter_ggmap_project"
+base_directory = r"E:\playground\flutter_playground_vsc\Flutter_ggmap_project_Without_Sequential"
 densities_dir = os.path.join(base_directory, "densities")
 today_densities_path = os.path.join(densities_dir, "today_densities.json")
 yesterday_max_densities_path = os.path.join(densities_dir, "yesterday_max_densities.json")
