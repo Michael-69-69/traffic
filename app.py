@@ -112,7 +112,7 @@ cameras = [
 ]
 
 # Paths for models and output
-road_model_path = "unet_road_segmentation (Better).keras"
+road_model_path = "unet_road_segmentation.keras"  # Removed "(Better)" from filename
 vehicle_model_path = "unet_multi_classV1.keras"
 base_directory = "/app"  # This matches the WORKDIR in Dockerfile
 densities_dir = os.path.join(base_directory, "densities")
@@ -370,3 +370,7 @@ except Exception as e:
     logging.error(f"An unexpected error occurred: {e}")
 finally:
     logging.info("Script finished.")
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
