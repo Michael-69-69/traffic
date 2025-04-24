@@ -25,7 +25,7 @@ RUN pip install --upgrade pip && \
 
 # Copy the application code and models
 COPY app.py .
-COPY "unet_road_segmentation (Better).keras" ./unet_road_segmentation.keras
+COPY unet_road_segmentation.keras .
 COPY unet_multi_classV1.keras .
 
 # Create necessary directories and files
