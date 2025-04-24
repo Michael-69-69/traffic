@@ -26,7 +26,12 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
 # Load Models
 def load_trained_model(model_path, custom_objects=None):
     try:
-        return tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+        # Add custom loss function to custom_objects
+        if custom_objects is None:
+            custom_objects = {'dice_loss': dice_loss}
+        
+        # Load model with tf.keras instead of keras
+        return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
     except Exception as e:
         logging.error(f"Failed to load model {model_path}: {e}")
         raise
@@ -141,8 +146,10 @@ default_params = {
 
 # Load models
 try:
-    road_model = load_trained_model(road_model_path)
-    vehicle_model = load_trained_model(vehicle_model_path)
+    # Load models with custom objects
+    custom_objects = {'dice_loss': dice_loss}
+    road_model = load_trained_model(road_model_path, custom_objects=custom_objects)
+    vehicle_model = load_trained_model(vehicle_model_path, custom_objects=custom_objects)
     logging.info("Models loaded successfully")
 except Exception as e:
     logging.error(f"Failed to load models: {e}")
