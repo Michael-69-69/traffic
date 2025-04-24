@@ -8,9 +8,13 @@ import json
 from datetime import datetime, timedelta
 import unicodedata
 import logging
+from flask import Flask
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Create Flask app instance
+app = Flask(__name__)
 
 # Parameters
 IMG_HEIGHT = 128
@@ -467,29 +471,28 @@ def get_densities():
         return {"error": "Could not read densities data"}, 500
 
 if __name__ == "__main__":
-    # Create Flask app instance
-    from flask import Flask
-    app = Flask(__name__)
+    # Check and convert models if needed
+    check_and_convert_models()
     
-    # Initialize the app
-    manage_historical_densities()
+    # Load models
+    logging.info("Loading road segmentation model...")
+    road_model = load_trained_model(road_model_path)
+    logging.info("Road segmentation model loaded successfully")
     
-    # Run the density fetch in a separate thread
+    logging.info("Loading vehicle detection model...")
+    vehicle_model = load_trained_model(vehicle_model_path)
+    logging.info("Vehicle detection model loaded successfully")
+    
+    # Create a session for making requests
+    session = requests.Session()
+    
+    # Start the density worker thread
     import threading
-    
-    def density_worker():
-        while True:
-            try:
-                fetch_and_process_densities()
-                time.sleep(20)
-            except Exception as e:
-                logging.error(f"Error in density fetch thread: {e}")
-                time.sleep(5)
-    
-    density_thread = threading.Thread(target=density_worker)
-    density_thread.daemon = True
+    density_thread = threading.Thread(target=density_worker, daemon=True)
     density_thread.start()
     
+    # Get the port from environment variable or use default
+    port = int(os.environ.get("PORT", 5000))
+    
     # Run the Flask app
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)
