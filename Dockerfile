@@ -35,6 +35,9 @@ RUN mkdir -p /app/densities && \
     touch /app/densities/critical_densities.json && \
     touch /app/densities/densities.json
 
+# Create a dummy file for model conversion if needed
+RUN echo '{"version": 1}' > /app/model_config.json
+
 # Set proper permissions
 RUN chown -R appuser:appuser /app
 
@@ -43,7 +46,8 @@ USER appuser
 
 # Environment variables for configuration
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    TF_CPP_MIN_LOG_LEVEL=2
 
 # Run the app
 CMD ["python", "app.py"]

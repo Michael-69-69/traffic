@@ -30,11 +30,50 @@ def load_trained_model(model_path, custom_objects=None):
         if custom_objects is None:
             custom_objects = {'dice_loss': dice_loss}
         
-        # Load model with tf.keras instead of keras
-        return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
+        # Try loading with direct keras import first
+        try:
+            import keras
+            logging.info(f"Attempting to load model with direct keras import: {model_path}")
+            return keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
+        except Exception as keras_err:
+            logging.warning(f"Failed to load model with direct keras import: {keras_err}")
+            
+            # Fallback to tf.keras
+            logging.info(f"Attempting to load model with tf.keras: {model_path}")
+            return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
+            
     except Exception as e:
         logging.error(f"Failed to load model {model_path}: {e}")
-        raise
+        
+        # Last resort - try to force load the model by changing the module name
+        try:
+            logging.info(f"Attempting last resort model loading for {model_path}")
+            from tensorflow.python.keras.saving import hdf5_format
+            import h5py
+            
+            # Load the model file
+            with h5py.File(model_path, mode='r') as f:
+                # Load the model
+                model = tf.keras.models.Sequential()
+                model_config = json.loads(f.attrs.get('model_config').decode('utf-8'))
+                # Modify the config to use tf.keras instead of keras.src
+                model_config_str = json.dumps(model_config)
+                model_config_str = model_config_str.replace('keras.src', 'tensorflow.keras')
+                model_config = json.loads(model_config_str)
+                
+                # Create the model from the modified config
+                model = tf.keras.models.model_from_json(json.dumps(model_config), custom_objects=custom_objects)
+                
+                # Set the weights
+                weight_names = [name for name in f.attrs['weight_names']]
+                if weight_names:
+                    weights = [np.array(f[weight_name]) for weight_name in weight_names]
+                    model.set_weights(weights)
+                
+                return model
+        except Exception as last_err:
+            logging.error(f"All model loading attempts failed: {last_err}")
+            raise
 
 # Preprocess Image
 def preprocess_image(img):
@@ -146,11 +185,25 @@ default_params = {
 
 # Load models
 try:
+    # Ensure TensorFlow and Keras are compatible
+    logging.info(f"TensorFlow version: {tf.__version__}")
+    try:
+        import keras
+        logging.info(f"Keras version: {keras.__version__}")
+    except:
+        logging.info("Using TensorFlow's built-in Keras")
+    
     # Load models with custom objects
     custom_objects = {'dice_loss': dice_loss}
+    
+    logging.info(f"Loading road segmentation model from {road_model_path}")
     road_model = load_trained_model(road_model_path, custom_objects=custom_objects)
+    logging.info("Road segmentation model loaded successfully")
+    
+    logging.info(f"Loading vehicle detection model from {vehicle_model_path}")
     vehicle_model = load_trained_model(vehicle_model_path, custom_objects=custom_objects)
-    logging.info("Models loaded successfully")
+    logging.info("Vehicle detection model loaded successfully")
+    
 except Exception as e:
     logging.error(f"Failed to load models: {e}")
     exit(1)
@@ -161,7 +214,7 @@ def manage_historical_densities():
     yesterday = today - timedelta(days=1)
     day_before_yesterday = today - timedelta(days=2)
 
-    # Initialize today’s densities
+    # Initialize today's densities
     today_densities = {}
     if os.path.exists(today_densities_path):
         try:
@@ -171,7 +224,7 @@ def manage_historical_densities():
             if 'date' in today_densities:
                 file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
                 if file_date != today:
-                    # Move today’s densities to yesterday if it’s from a previous day
+                    # Move today's densities to yesterday if it's from a previous day
                     max_densities = {}
                     for cam_id in today_densities:
                         if cam_id != 'date':
@@ -190,7 +243,7 @@ def manage_historical_densities():
     else:
         today_densities = {'date': today.strftime('%Y-%m-%d')}
 
-    # Load yesterday’s max densities as critical densities
+    # Load yesterday's max densities as critical densities
     critical_densities = {}
     if os.path.exists(yesterday_max_densities_path):
         try:
@@ -200,7 +253,7 @@ def manage_historical_densities():
                 if file_date == yesterday:
                     critical_densities = {k: v for k, v in yesterday_data.items() if k != 'date'}
                 else:
-                    # If yesterday’s data is older, delete it
+                    # If yesterday's data is older, delete it
                     os.remove(yesterday_max_densities_path)
                     logging.info(f"Deleted outdated yesterday_max_densities.json from {file_date}")
         except Exception as e:
@@ -239,7 +292,7 @@ def manage_historical_densities():
             json.dump(critical_densities, f, ensure_ascii=False)
         logging.info(f"Initialized sample critical densities to {critical_densities_path}: {critical_densities}")
 
-    # Delete day before yesterday’s data if it exists
+    # Delete day before yesterday's data if it exists
     if os.path.exists(yesterday_max_densities_path):
         try:
             with open(yesterday_max_densities_path, 'r', encoding='utf-8') as f:
@@ -338,7 +391,7 @@ def fetch_and_process_densities():
             current_densities[camera_id] = adjusted_density
             logging.info(f"Camera {camera_id} ({cam_location}): Density = {adjusted_density:.2f}% (Raw: {vehicle_density:.2f}%, kc: {kc})")
 
-            # Update today’s densities
+            # Update today's densities
             if camera_id not in today_densities:
                 today_densities[camera_id] = {}
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -348,11 +401,11 @@ def fetch_and_process_densities():
             logging.error(f"Error processing image for {cam_location}: {e}")
             continue
 
-    # Save today’s densities
+    # Save today's densities
     try:
         with open(today_densities_path, 'w', encoding='utf-8') as f:
             json.dump(today_densities, f, ensure_ascii=False)
-        logging.info(f"Today’s densities updated at {today_densities_path}")
+        logging.info(f"Today's densities updated at {today_densities_path}")
     except Exception as e:
         logging.error(f"Error saving today_densities.json: {e}")
 
@@ -379,5 +432,7 @@ finally:
     logging.info("Script finished.")
 
 if __name__ == "__main__":
+    from flask import Flask
+    app = Flask(__name__)
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
