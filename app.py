@@ -325,3 +325,37 @@ def manage_historical_densities():
             'K': 80.0,  # Công Trường Dân Chủ (busy)
             'L': 80.0   # Công Trường Dân Chủ_1 (busy)
         }
+        critical_densities = sample_critical_densities
+        with open(critical_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(critical_densities, f, ensure_ascii=False)
+        logging.info("Saved sample critical densities")
+
+    return critical_densities, today_densities
+
+if __name__ == "__main__":
+    # Create Flask app instance
+    from flask import Flask
+    app = Flask(__name__)
+    
+    # Initialize the app
+    manage_historical_densities()
+    
+    # Run the density fetch in a separate thread
+    import threading
+    
+    def density_worker():
+        while True:
+            try:
+                fetch_and_process_densities()
+                time.sleep(20)
+            except Exception as e:
+                logging.error(f"Error in density fetch thread: {e}")
+                time.sleep(5)
+    
+    density_thread = threading.Thread(target=density_worker)
+    density_thread.daemon = True
+    density_thread.start()
+    
+    # Run the Flask app
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, debug=False)
