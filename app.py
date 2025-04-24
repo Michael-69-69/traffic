@@ -114,12 +114,12 @@ cameras = [
 # Paths for models and output
 road_model_path = "unet_road_segmentation (Better).keras"
 vehicle_model_path = "unet_multi_classV1.keras"
-base_directory = r"E:\playground\flutter_playground_vsc\Flutter_ggmap_project_Without_Sequential"
+base_directory = "/app"  # This matches the WORKDIR in Dockerfile
 densities_dir = os.path.join(base_directory, "densities")
 today_densities_path = os.path.join(densities_dir, "today_densities.json")
 yesterday_max_densities_path = os.path.join(densities_dir, "yesterday_max_densities.json")
 critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
-output_json_path = os.path.join(base_directory, "densities.json")
+output_json_path = os.path.join(densities_dir, "densities.json")
 
 # Create directories if they don't exist
 os.makedirs(densities_dir, exist_ok=True)

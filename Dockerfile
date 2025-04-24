@@ -25,17 +25,25 @@ RUN pip install --upgrade pip && \
 
 # Copy the application code and models
 COPY app.py .
-COPY "unet_road_segmentation (Better).keras" .
+COPY "unet_road_segmentation (Better).keras" ./unet_road_segmentation.keras
 COPY unet_multi_classV1.keras .
 
-# Create necessary directories
-RUN mkdir -p /app/densities
+# Create necessary directories and files
+RUN mkdir -p /app/densities && \
+    touch /app/densities/today_densities.json && \
+    touch /app/densities/yesterday_max_densities.json && \
+    touch /app/densities/critical_densities.json && \
+    touch /app/densities/densities.json
 
 # Set proper permissions
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
+
+# Environment variables for configuration
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Run the app
 CMD ["python", "app.py"]
