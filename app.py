@@ -332,6 +332,140 @@ def manage_historical_densities():
 
     return critical_densities, today_densities
 
+def fetch_and_process_densities():
+    """Fetch images from traffic cameras, process them, and calculate traffic densities"""
+    logging.info("Starting density analysis cycle")
+    
+    # Get critical densities and today's densities
+    critical_densities, today_densities = manage_historical_densities()
+    
+    # Timestamp for this fetch cycle
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Results dictionary
+    results = {
+        "timestamp": current_time,
+        "cameras": {}
+    }
+    
+    # Process each camera
+    for camera_id, camera_name in cameras:
+        try:
+            # Build parameters for this camera
+            params = default_params.copy()
+            params["cameraId"] = camera_id
+            
+            # Fetch the image
+            response = session.get(base_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                # Convert response to OpenCV image
+                nparr = np.frombuffer(response.content, np.uint8)
+                original_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if original_image is None or original_image.size == 0:
+                    logging.warning(f"Empty image received for camera {camera_name}")
+                    continue
+                
+                # Preprocess image
+                img_processed = preprocess_image(original_image)
+                
+                # Road segmentation
+                road_pred = road_model.predict(img_processed, verbose=0)
+                road_mask = postprocess_road_mask(road_pred)
+                
+                # Extract segmented road area
+                segmented_road, mask_resized = extract_segmented_road(original_image, road_mask)
+                
+                # If there's a road detected, process vehicles
+                road_pixels = np.sum(mask_resized)
+                if road_pixels > 0:
+                    # Repreprocess the segmented road image
+                    segmented_processed = preprocess_image(segmented_road)
+                    
+                    # Vehicle detection on the road area
+                    vehicle_pred = vehicle_model.predict(segmented_processed, verbose=0)
+                    vehicle_mask = postprocess_vehicle_mask(vehicle_pred)
+                    
+                    # Calculate densities
+                    # Class 1 = car, Class 2 = motorcycle, Class 3 = other vehicles
+                    car_pixels = np.sum(vehicle_mask == 1)
+                    motorcycle_pixels = np.sum(vehicle_mask == 2)
+                    other_pixels = np.sum(vehicle_mask == 3)
+                    
+                    # Total vehicle pixels
+                    vehicle_pixels = car_pixels + motorcycle_pixels + other_pixels
+                    
+                    # Calculate density as percentage of road covered by vehicles
+                    density = (vehicle_pixels / road_pixels) * 100 if road_pixels > 0 else 0
+                    
+                    # Normalize density to a 0-100 scale (cap at 100%)
+                    density = min(density * 1.5, 100)  # Amplify by 1.5x for better sensitivity
+                    
+                    # Get the critical density for this camera
+                    camera_code = camera_mapping.get(camera_name, camera_name)
+                    critical_density = critical_densities.get(camera_code, 80.0)
+                    
+                    # Calculate congestion level (0-100%)
+                    congestion_level = min(100, (density / critical_density) * 100) if critical_density > 0 else 0
+                    
+                    # Update today's densities
+                    hour_str = datetime.now().strftime('%H:%M')
+                    if camera_code not in today_densities:
+                        today_densities[camera_code] = {}
+                    today_densities[camera_code][hour_str] = density
+                    
+                    # Add to results
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "density": round(density, 2),
+                        "congestion_level": round(congestion_level, 2),
+                        "critical_density": round(critical_density, 2),
+                        "composition": {
+                            "cars": round((car_pixels / vehicle_pixels) * 100 if vehicle_pixels > 0 else 0, 2),
+                            "motorcycles": round((motorcycle_pixels / vehicle_pixels) * 100 if vehicle_pixels > 0 else 0, 2),
+                            "others": round((other_pixels / vehicle_pixels) * 100 if vehicle_pixels > 0 else 0, 2)
+                        }
+                    }
+                    
+                    logging.info(f"Processed {camera_name}: Density={round(density, 2)}%, Congestion={round(congestion_level, 2)}%")
+                else:
+                    logging.warning(f"No road detected for camera {camera_name}")
+            else:
+                logging.warning(f"Failed to fetch image for camera {camera_name}: Status code {response.status_code}")
+                
+        except Exception as e:
+            logging.error(f"Error processing camera {camera_name}: {e}")
+    
+    # Save today's densities
+    with open(today_densities_path, 'w', encoding='utf-8') as f:
+        json.dump(today_densities, f, ensure_ascii=False)
+    
+    # Save the results to the output JSON file
+    with open(output_json_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    
+    logging.info(f"Density analysis completed. Results saved to {output_json_path}")
+
+# Flask routes
+@app.route('/')
+def index():
+    return {
+        "status": "running",
+        "version": "1.0",
+        "message": "Traffic Analysis Service is operational"
+    }
+
+@app.route('/densities')
+def get_densities():
+    try:
+        with open(output_json_path, 'r', encoding='utf-8') as f:
+            densities = json.load(f)
+        return densities
+    except Exception as e:
+        logging.error(f"Error reading densities: {e}")
+        return {"error": "Could not read densities data"}, 500
+
 if __name__ == "__main__":
     # Create Flask app instance
     from flask import Flask

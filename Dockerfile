@@ -32,15 +32,20 @@ COPY unet_road_segmentation.keras .
 COPY unet_multi_classV1.keras .
 
 # Create necessary directories and files
+# Create empty files with proper permissions first
 RUN mkdir -p /app/densities && \
     touch /app/densities/today_densities.json && \
     touch /app/densities/yesterday_max_densities.json && \
     touch /app/densities/critical_densities.json && \
-    touch /app/densities/densities.json
+    touch /app/densities/densities.json && \
+    echo "{}" > /app/densities/today_densities.json && \
+    echo "{}" > /app/densities/yesterday_max_densities.json && \
+    echo "{}" > /app/densities/critical_densities.json && \
+    echo "{}" > /app/densities/densities.json && \
+    chown -R appuser:appuser /app
 
-# Set proper permissions
-RUN chown -R appuser:appuser /app
-
+# Use a more robust startup command
+CMD ["python", "app.py"]
 # Switch to non-root user
 USER appuser
 
