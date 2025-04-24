@@ -23,6 +23,9 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copy the model converter first
+COPY model_converter.py .
+
 # Copy the application code and models
 COPY app.py .
 COPY unet_road_segmentation.keras .
@@ -35,9 +38,6 @@ RUN mkdir -p /app/densities && \
     touch /app/densities/critical_densities.json && \
     touch /app/densities/densities.json
 
-# Create a dummy file for model conversion if needed
-RUN echo '{"version": 1}' > /app/model_config.json
-
 # Set proper permissions
 RUN chown -R appuser:appuser /app
 
@@ -49,5 +49,5 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TF_CPP_MIN_LOG_LEVEL=2
 
-# Run the app
-CMD ["python", "app.py"]
+# Run the model converter and then the app
+CMD python -c "import model_converter; model_converter.convert_standalone_keras_to_tf('unet_road_segmentation.keras', 'unet_road_segmentation.keras_tf'); model_converter.convert_standalone_keras_to_tf('unet_multi_classV1.keras', 'unet_multi_classV1.keras_tf')" && python app.py

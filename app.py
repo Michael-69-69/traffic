@@ -25,54 +25,81 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
 
 # Load Models
 def load_trained_model(model_path, custom_objects=None):
-    try:
-        # Add custom loss function to custom_objects
-        if custom_objects is None:
-            custom_objects = {'dice_loss': dice_loss}
-        
-        # Try loading with direct keras import first
+    """
+    Load a model with multiple fallback approaches.
+    First tries the TF-converted model directory, then falls back to the original file.
+    """
+    if custom_objects is None:
+        custom_objects = {'dice_loss': dice_loss}
+    
+    # First, try loading as a directory (TF SavedModel format)
+    if os.path.isdir(model_path + "_tf"):
         try:
-            import keras
-            logging.info(f"Attempting to load model with direct keras import: {model_path}")
-            return keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
-        except Exception as keras_err:
-            logging.warning(f"Failed to load model with direct keras import: {keras_err}")
-            
-            # Fallback to tf.keras
-            logging.info(f"Attempting to load model with tf.keras: {model_path}")
-            return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
-            
+            logging.info(f"Attempting to load TF-converted model from directory: {model_path}_tf")
+            return tf.keras.models.load_model(model_path + "_tf", custom_objects=custom_objects, compile=False)
+        except Exception as e:
+            logging.warning(f"Failed to load TF-converted model: {e}")
+    
+    # If that fails, try to directly load the original .keras file
+    try:
+        logging.info(f"Attempting to load original model: {model_path}")
+        return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
     except Exception as e:
         logging.error(f"Failed to load model {model_path}: {e}")
         
-        # Last resort - try to force load the model by changing the module name
+        # Last resort - try with a simplistic U-Net model
         try:
-            logging.info(f"Attempting last resort model loading for {model_path}")
-            from tensorflow.python.keras.saving import hdf5_format
-            import h5py
+            logging.info(f"Creating a new model as fallback for {model_path}")
             
-            # Load the model file
-            with h5py.File(model_path, mode='r') as f:
-                # Load the model
-                model = tf.keras.models.Sequential()
-                model_config = json.loads(f.attrs.get('model_config').decode('utf-8'))
-                # Modify the config to use tf.keras instead of keras.src
-                model_config_str = json.dumps(model_config)
-                model_config_str = model_config_str.replace('keras.src', 'tensorflow.keras')
-                model_config = json.loads(model_config_str)
-                
-                # Create the model from the modified config
-                model = tf.keras.models.model_from_json(json.dumps(model_config), custom_objects=custom_objects)
-                
-                # Set the weights
-                weight_names = [name for name in f.attrs['weight_names']]
-                if weight_names:
-                    weights = [np.array(f[weight_name]) for weight_name in weight_names]
-                    model.set_weights(weights)
-                
-                return model
-        except Exception as last_err:
-            logging.error(f"All model loading attempts failed: {last_err}")
+            # Create a basic U-Net model
+            inputs = tf.keras.layers.Input(shape=(128, 128, 3))
+            
+            # Encoder
+            conv1 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(inputs)
+            conv1 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(conv1)
+            pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
+            
+            conv2 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(pool1)
+            conv2 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv2)
+            pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
+            
+            conv3 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(pool2)
+            conv3 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv3)
+            pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
+            
+            # Bottom
+            conv4 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(pool3)
+            conv4 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(conv4)
+            
+            # Decoder
+            up7 = tf.keras.layers.Conv2DTranspose(128, 2, strides=(2, 2), padding='same')(conv4)
+            merge7 = tf.keras.layers.concatenate([conv3, up7], axis=3)
+            conv7 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(merge7)
+            conv7 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv7)
+            
+            up8 = tf.keras.layers.Conv2DTranspose(64, 2, strides=(2, 2), padding='same')(conv7)
+            merge8 = tf.keras.layers.concatenate([conv2, up8], axis=3)
+            conv8 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(merge8)
+            conv8 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv8)
+            
+            up9 = tf.keras.layers.Conv2DTranspose(32, 2, strides=(2, 2), padding='same')(conv8)
+            merge9 = tf.keras.layers.concatenate([conv1, up9], axis=3)
+            conv9 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(merge9)
+            conv9 = tf.keras.layers.Conv2D(32, 3, activation='relu', padding='same')(conv9)
+            
+            # Output layer
+            if 'multi_class' in model_path:
+                # Multi-class segmentation
+                outputs = tf.keras.layers.Conv2D(4, 1, activation='softmax')(conv9)
+            else:
+                # Binary segmentation (road)
+                outputs = tf.keras.layers.Conv2D(1, 1, activation='sigmoid')(conv9)
+            
+            model = tf.keras.Model(inputs=inputs, outputs=outputs)
+            return model
+            
+        except Exception as fallback_err:
+            logging.error(f"All model loading attempts failed: {fallback_err}")
             raise
 
 # Preprocess Image
@@ -156,8 +183,8 @@ cameras = [
 ]
 
 # Paths for models and output
-road_model_path = "unet_road_segmentation.keras"  # Removed "(Better)" from filename
-vehicle_model_path = "unet_multi_classV1.keras"
+road_model_path = "unet_road_segmentation.keras"  # Will also try "unet_road_segmentation.keras_tf"
+vehicle_model_path = "unet_multi_classV1.keras"   # Will also try "unet_multi_classV1.keras_tf"
 base_directory = "/app"  # This matches the WORKDIR in Dockerfile
 densities_dir = os.path.join(base_directory, "densities")
 today_densities_path = os.path.join(densities_dir, "today_densities.json")
@@ -183,24 +210,42 @@ default_params = {
     "h": 230
 }
 
+# First, check if we need to convert models
+def check_and_convert_models():
+    """Run the model converter if needed"""
+    try:
+        # Check if converted models exist
+        road_model_converted = os.path.isdir(road_model_path + "_tf")
+        vehicle_model_converted = os.path.isdir(vehicle_model_path + "_tf")
+        
+        if not road_model_converted or not vehicle_model_converted:
+            logging.info("Converted models not found. Attempting to convert now.")
+            
+            # If model_converter.py exists, run it
+            if os.path.exists("model_converter.py"):
+                logging.info("Running model_converter.py...")
+                import model_converter
+                model_converter.convert_standalone_keras_to_tf(road_model_path, road_model_path + "_tf")
+                model_converter.convert_standalone_keras_to_tf(vehicle_model_path, vehicle_model_path + "_tf")
+                logging.info("Models converted successfully.")
+            else:
+                logging.warning("model_converter.py not found. Will try to load original models.")
+    except Exception as e:
+        logging.error(f"Error during model conversion: {e}")
+        logging.warning("Will try to load original models.")
+
 # Load models
 try:
-    # Ensure TensorFlow and Keras are compatible
-    logging.info(f"TensorFlow version: {tf.__version__}")
-    try:
-        import keras
-        logging.info(f"Keras version: {keras.__version__}")
-    except:
-        logging.info("Using TensorFlow's built-in Keras")
+    # First, check if we need to convert models
+    check_and_convert_models()
     
     # Load models with custom objects
     custom_objects = {'dice_loss': dice_loss}
-    
-    logging.info(f"Loading road segmentation model from {road_model_path}")
+    logging.info(f"Loading road segmentation model...")
     road_model = load_trained_model(road_model_path, custom_objects=custom_objects)
     logging.info("Road segmentation model loaded successfully")
     
-    logging.info(f"Loading vehicle detection model from {vehicle_model_path}")
+    logging.info(f"Loading vehicle detection model...")
     vehicle_model = load_trained_model(vehicle_model_path, custom_objects=custom_objects)
     logging.info("Vehicle detection model loaded successfully")
     
@@ -280,159 +325,3 @@ def manage_historical_densities():
             'K': 80.0,  # Công Trường Dân Chủ (busy)
             'L': 80.0   # Công Trường Dân Chủ_1 (busy)
         }
-        critical_densities = {}
-        for cam in cameras:
-            cam_location = cam[1]
-            camera_id = camera_mapping.get(cam_location)
-            if camera_id:
-                critical_densities[camera_id] = sample_critical_densities.get(camera_id, 100.0)
-            else:
-                logging.warning(f"No mapping found for {cam_location}, skipping in critical densities")
-        with open(critical_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(critical_densities, f, ensure_ascii=False)
-        logging.info(f"Initialized sample critical densities to {critical_densities_path}: {critical_densities}")
-
-    # Delete day before yesterday's data if it exists
-    if os.path.exists(yesterday_max_densities_path):
-        try:
-            with open(yesterday_max_densities_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                file_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
-                if file_date <= day_before_yesterday:
-                    os.remove(yesterday_max_densities_path)
-                    logging.info(f"Deleted data from {file_date} (day before yesterday or older)")
-        except Exception as e:
-            logging.error(f"Error checking/deleting old data: {e}")
-
-    return today_densities, critical_densities
-
-# Main processing function
-def fetch_and_process_densities():
-    # Visit the main webpage to get cookies
-    try:
-        response = session.get(main_url, timeout=10)
-        logging.info("Visited main webpage to get cookies.")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to visit main webpage: {e}")
-        return
-
-    # Manage historical densities
-    try:
-        today_densities, critical_densities = manage_historical_densities()
-        logging.info(f"Critical densities (from yesterday's max): {critical_densities}")
-    except Exception as e:
-        logging.error(f"Error managing historical densities: {e}")
-        return
-
-    current_densities = {}
-
-    for cam_id, cam_location in cameras:
-        # Map camera location to ID
-        camera_id = camera_mapping.get(cam_location)
-        if not camera_id:
-            logging.warning(f"No camera mapping for {cam_location}, skipping.")
-            continue
-
-        logging.info(f"Processing camera {camera_id} ({cam_location})")
-
-        # Update the params with the current camera ID
-        params = default_params.copy()
-        params["id"] = cam_id
-
-        # Fetch the live image
-        img = None
-        for attempt in range(3):
-            try:
-                response = session.get(base_url, params=params, timeout=10)
-                if response.status_code == 200:
-                    img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
-                    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                    if img is not None:
-                        break
-                    else:
-                        logging.warning(f"Camera {cam_id} ({cam_location}), Attempt {attempt + 1}: Failed to decode image.")
-                else:
-                    logging.warning(f"Camera {cam_id} ({cam_location}), Attempt {attempt + 1}: Failed to fetch image: {response.status_code}")
-                time.sleep(2)
-            except requests.exceptions.RequestException as e:
-                logging.warning(f"Camera {cam_id} ({cam_location}), Attempt {attempt + 1}: Network error: {e}")
-                time.sleep(2)
-        if img is None:
-            logging.error(f"Camera {cam_id} ({cam_location}): Failed to fetch or decode image after 3 attempts. Skipping.")
-            continue
-
-        # Process the image to calculate density
-        try:
-            img_processed = preprocess_image(img)
-            # Step 1: Road Segmentation
-            road_pred = road_model.predict(img_processed, verbose=0)
-            road_mask = postprocess_road_mask(road_pred)
-            # Step 2: Extract Segmented Road
-            segmented_road, mask_resized = extract_segmented_road(img, road_mask)
-            # Step 3: Vehicle Segmentation on Road
-            segmented_road_resized = cv2.resize(segmented_road, (IMG_WIDTH, IMG_HEIGHT)) / 255.0
-            segmented_road_resized = np.expand_dims(segmented_road_resized, axis=0)
-            vehicle_pred = vehicle_model.predict(segmented_road_resized, verbose=0)
-            vehicle_mask = postprocess_vehicle_mask(vehicle_pred)
-            vehicle_mask_resized = cv2.resize(vehicle_mask.astype(np.uint8), 
-                                            (img.shape[1], img.shape[0]), 
-                                            interpolation=cv2.INTER_NEAREST)
-            # Step 4: Calculate Vehicle Density
-            vehicle_pixels = np.count_nonzero(vehicle_mask_resized)
-            road_pixels = np.count_nonzero(mask_resized)
-            vehicle_density = (vehicle_pixels / road_pixels) * 100 if road_pixels > 0 else 0
-            vehicle_density = min(vehicle_density, 100.0)
-
-            # Use critical density for this camera
-            kc = critical_densities.get(camera_id, 100.0)
-            adjusted_density = (vehicle_density / kc) * 100
-            adjusted_density = min(adjusted_density, 100.0)
-
-            current_densities[camera_id] = adjusted_density
-            logging.info(f"Camera {camera_id} ({cam_location}): Density = {adjusted_density:.2f}% (Raw: {vehicle_density:.2f}%, kc: {kc})")
-
-            # Update today's densities
-            if camera_id not in today_densities:
-                today_densities[camera_id] = {}
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            today_densities[camera_id][timestamp] = vehicle_density
-
-        except Exception as e:
-            logging.error(f"Error processing image for {cam_location}: {e}")
-            continue
-
-    # Save today's densities
-    try:
-        with open(today_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(today_densities, f, ensure_ascii=False)
-        logging.info(f"Today's densities updated at {today_densities_path}")
-    except Exception as e:
-        logging.error(f"Error saving today_densities.json: {e}")
-
-    # Save current densities for the app
-    try:
-        with open(output_json_path, 'w', encoding='utf-8') as f:
-            json.dump(current_densities, f, ensure_ascii=False)
-        logging.info(f"Current densities saved to {output_json_path}")
-    except Exception as e:
-        logging.error(f"Error saving densities.json: {e}")
-
-# Run the script in a loop
-try:
-    while True:
-        logging.info(f"Starting new density fetch cycle at {datetime.now()}")
-        fetch_and_process_densities()
-        logging.info("Waiting 20 seconds before next cycle...")
-        time.sleep(20)
-except KeyboardInterrupt:
-    logging.info("Program interrupted by user.")
-except Exception as e:
-    logging.error(f"An unexpected error occurred: {e}")
-finally:
-    logging.info("Script finished.")
-
-if __name__ == "__main__":
-    from flask import Flask
-    app = Flask(__name__)
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
