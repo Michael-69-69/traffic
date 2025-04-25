@@ -246,58 +246,64 @@ def manage_historical_densities():
 
 def density_worker():
     """Background worker to process densities periodically"""
-    while True:
-        try:
-            # Wait before processing to allow the server to start completely
-            time.sleep(300)  # 5 minutes between updates
-            
-            # Only run model-based processing after server is stable
-            logger.info("Starting density analysis")
-            
-            # Load models if not already loaded
-            if _road_model is None or _vehicle_model is None:
-                success = load_models()
-                if not success:
-                    logger.error("Failed to load models, using sample data")
-                    continue
-            
-            # Get critical densities and today's densities
-            critical_densities, today_densities = manage_historical_densities()
-            
-            # Generate results (can be enhanced with actual model predictions later)
-            results = {
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "cameras": {}
-            }
-            
-            # For memory optimization in this version, we'll just update timestamps
-            # The full model-based processing can be added back in a separate PR
-            for _, camera_name in cameras:
-                camera_code = camera_mapping.get(camera_name, camera_name)
-                critical_density = critical_densities.get(camera_code, 80.0)
+    try:
+        # Initial run without delay
+        manage_historical_densities()
+        logger.info("Initial density data created")
+        
+        while True:
+            try:
+                time.sleep(60)  # Reduce to 1 minute between updates
                 
-                # Add to results with simulated values
-                results["cameras"][camera_code] = {
-                    "name": camera_name,
-                    "density": 50.0,  # Placeholder
-                    "congestion_level": 62.5,  # Placeholder
-                    "critical_density": critical_density,
-                    "composition": {
-                        "cars": 60.0,
-                        "motorcycles": 35.0,
-                        "others": 5.0
-                    }
+                # Only run model-based processing after server is stable
+                logger.info("Starting density analysis")
+                
+                # Load models if not already loaded
+                if _road_model is None or _vehicle_model is None:
+                    success = load_models()
+                    if not success:
+                        logger.error("Failed to load models, using sample data")
+                        continue
+                
+                # Get critical densities and today's densities
+                critical_densities, today_densities = manage_historical_densities()
+                
+                # Generate results (can be enhanced with actual model predictions later)
+                results = {
+                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "cameras": {}
                 }
-            
-            # Save the results to the output JSON file
-            with open(output_json_path, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-            
-            logger.info("Density analysis completed")
-            
-        except Exception as e:
-            logger.error(f"Error in density worker: {e}")
-            time.sleep(60)  # Wait a minute before retrying
+                
+                # For memory optimization in this version, we'll just update timestamps
+                # The full model-based processing can be added back in a separate PR
+                for _, camera_name in cameras:
+                    camera_code = camera_mapping.get(camera_name, camera_name)
+                    critical_density = critical_densities.get(camera_code, 80.0)
+                    
+                    # Add to results with simulated values
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "density": 50.0,  # Placeholder
+                        "congestion_level": 62.5,  # Placeholder
+                        "critical_density": critical_density,
+                        "composition": {
+                            "cars": 60.0,
+                            "motorcycles": 35.0,
+                            "others": 5.0
+                        }
+                    }
+                
+                # Save the results to the output JSON file
+                with open(output_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                
+                logger.info("Density analysis completed")
+                
+            except Exception as e:
+                logger.error(f"Error in density worker loop: {e}")
+                time.sleep(30)  # Shorter retry interval
+    except Exception as e:
+        logger.error(f"Critical error in density worker: {e}")
 
 # Flask routes
 @app.route('/')
@@ -311,16 +317,25 @@ def index():
 @app.route('/densities')
 def get_densities():
     try:
-        # If the densities file doesn't exist yet, create it with initial data
+        # Log the attempt to read densities
+        logger.info(f"Attempting to read densities from {output_json_path}")
+        
+        # Check if file exists
         if not os.path.exists(output_json_path):
+            logger.warning(f"Densities file not found at {output_json_path}, creating initial data")
             manage_historical_densities()
-            
+        
+        # Try to read the file
         with open(output_json_path, 'r', encoding='utf-8') as f:
             densities = json.load(f)
-        return jsonify(densities)
+            logger.info("Successfully read densities data")
+            return jsonify(densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
-        return jsonify({"error": "Could not read densities data"}), 500
+        return jsonify({
+            "error": "Could not read densities data",
+            "details": str(e)
+        }), 500
 
 @app.route('/status')
 def status():
@@ -331,6 +346,29 @@ def status():
         "version": "1.0",
         "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
+
+@app.route('/health')
+def health_check():
+    try:
+        # Check if directories exist
+        densities_exists = os.path.exists(densities_dir)
+        output_exists = os.path.exists(output_json_path)
+        
+        return jsonify({
+            "status": "healthy",
+            "filesystem": {
+                "densities_dir_exists": densities_exists,
+                "output_file_exists": output_exists,
+                "densities_dir": densities_dir,
+                "output_path": output_json_path
+            },
+            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
 
 if __name__ == "__main__":
     # Initialize data files

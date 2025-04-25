@@ -37,6 +37,10 @@ COPY unet_road_segmentation.keras unet_multi_classV1.keras ./
 
 # Create necessary directories and files
 RUN mkdir -p /app/densities && \
+    touch /app/densities/today_densities.json && \
+    touch /app/densities/yesterday_max_densities.json && \
+    touch /app/densities/critical_densities.json && \
+    touch /app/densities/densities.json && \
     echo "{}" > /app/densities/today_densities.json && \
     echo "{}" > /app/densities/yesterday_max_densities.json && \
     echo "{}" > /app/densities/critical_densities.json && \
