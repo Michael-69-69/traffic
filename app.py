@@ -13,6 +13,22 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Start the density worker thread immediately
+def start_worker():
+    try:
+        # Load models first
+        load_models()
+        
+        # Start the density worker
+        density_thread = threading.Thread(target=density_worker, daemon=True)
+        density_thread.start()
+        logger.info("Density worker thread started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start density worker: {e}")
+
+# Start the worker when the app starts
+start_worker()
+
 # Paths for models and output
 base_directory = "/app"
 densities_dir = os.path.join(base_directory, "densities")
@@ -246,62 +262,23 @@ def manage_historical_densities():
 
 def density_worker():
     """Background worker to process densities periodically"""
+    logger.info("Density worker initialized")
+    
     try:
         # Initial run without delay
-        manage_historical_densities()
-        logger.info("Initial density data created")
+        logger.info("Starting initial density calculation")
+        critical_densities, today_densities = manage_historical_densities()
+        logger.info(f"Initial densities created: {len(critical_densities)} critical densities")
         
         while True:
             try:
-                time.sleep(60)  # Reduce to 1 minute between updates
-                
-                # Only run model-based processing after server is stable
-                logger.info("Starting density analysis")
-                
-                # Load models if not already loaded
-                if _road_model is None or _vehicle_model is None:
-                    success = load_models()
-                    if not success:
-                        logger.error("Failed to load models, using sample data")
-                        continue
-                
-                # Get critical densities and today's densities
-                critical_densities, today_densities = manage_historical_densities()
-                
-                # Generate results (can be enhanced with actual model predictions later)
-                results = {
-                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    "cameras": {}
-                }
-                
-                # For memory optimization in this version, we'll just update timestamps
-                # The full model-based processing can be added back in a separate PR
-                for _, camera_name in cameras:
-                    camera_code = camera_mapping.get(camera_name, camera_name)
-                    critical_density = critical_densities.get(camera_code, 80.0)
-                    
-                    # Add to results with simulated values
-                    results["cameras"][camera_code] = {
-                        "name": camera_name,
-                        "density": 50.0,  # Placeholder
-                        "congestion_level": 62.5,  # Placeholder
-                        "critical_density": critical_density,
-                        "composition": {
-                            "cars": 60.0,
-                            "motorcycles": 35.0,
-                            "others": 5.0
-                        }
-                    }
-                
-                # Save the results to the output JSON file
-                with open(output_json_path, 'w', encoding='utf-8') as f:
-                    json.dump(results, f, ensure_ascii=False, indent=2)
-                
-                logger.info("Density analysis completed")
-                
+                logger.info("Starting density processing cycle")
+                fetch_and_process_densities()
+                logger.info("Density processing cycle completed")
+                time.sleep(60)  # Check every minute
             except Exception as e:
-                logger.error(f"Error in density worker loop: {e}")
-                time.sleep(30)  # Shorter retry interval
+                logger.error(f"Error in density worker cycle: {e}")
+                time.sleep(30)  # Shorter retry interval on error
     except Exception as e:
         logger.error(f"Critical error in density worker: {e}")
 
