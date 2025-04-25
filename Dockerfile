@@ -9,8 +9,16 @@ LABEL maintainer="Developer" \
 # Set working directory
 WORKDIR /app
 
+# Set environment variables for optimizing TensorFlow memory usage
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    TF_FORCE_GPU_ALLOW_GROWTH=true \
+    TF_MEMORY_ALLOCATION=512MB \
+    PORT=10000
+
 # Install system dependencies and clean up in a single layer
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
@@ -23,36 +31,20 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the model converter first
-COPY model_converter.py .
-
 # Copy the application code and models
-COPY app.py .
-COPY unet_road_segmentation.keras .
-COPY unet_multi_classV1.keras .
+COPY model_converter.py app.py ./
+COPY unet_road_segmentation.keras unet_multi_classV1.keras ./
 
 # Create necessary directories and files
-# Create empty files with proper permissions first
 RUN mkdir -p /app/densities && \
-    touch /app/densities/today_densities.json && \
-    touch /app/densities/yesterday_max_densities.json && \
-    touch /app/densities/critical_densities.json && \
-    touch /app/densities/densities.json && \
     echo "{}" > /app/densities/today_densities.json && \
     echo "{}" > /app/densities/yesterday_max_densities.json && \
     echo "{}" > /app/densities/critical_densities.json && \
     echo "{}" > /app/densities/densities.json && \
     chown -R appuser:appuser /app
 
-# Use a more robust startup command
-CMD ["python", "app.py"]
 # Switch to non-root user
 USER appuser
 
-# Environment variables for configuration
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    TF_CPP_MIN_LOG_LEVEL=2
-
-# Run the model converter and then the app
-CMD python -c "import model_converter; model_converter.convert_standalone_keras_to_tf('unet_road_segmentation.keras', 'unet_road_segmentation.keras_tf'); model_converter.convert_standalone_keras_to_tf('unet_multi_classV1.keras', 'unet_multi_classV1.keras_tf')" && python app.py
+# Command to run application with memory optimizations
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 0 "app:app"
