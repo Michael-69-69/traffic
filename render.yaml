@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: traffic-analysis
+    env: docker
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: USE_MODELS
+        value: false
+      - key: BASE_DIR
+        value: /app
+      - key: PORT
+        value: 10000
+      - key: CAMERA_URL_TEMPLATE
+        value: https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: 2
+    buildCommand: "echo 'Build completed'"
