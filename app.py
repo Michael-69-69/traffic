@@ -547,8 +547,45 @@ def get_densities():
         # Try to read the file
         with open(output_json_path, 'r', encoding='utf-8') as f:
             densities = json.load(f)
-            logger.info("Successfully read densities data")
-            return jsonify(densities)
+            
+            # Restructure the data to display by road name
+            sorted_densities = {
+                "timestamp": densities["timestamp"],
+                "roads": []
+            }
+            
+            # Convert cameras dict to sorted list with camera feed URLs
+            for camera_code, camera_data in densities["cameras"].items():
+                # Find camera ID from the cameras list
+                camera_id = None
+                for cam_id, cam_name in cameras:
+                    if cam_name == camera_data["name"]:
+                        camera_id = cam_id
+                        break
+                
+                # Construct camera feed URL
+                camera_url = None
+                if camera_id:
+                    params = default_params.copy()
+                    params["id"] = camera_id
+                    camera_url = f"{base_url}?id={camera_id}&bg={params['bg']}&w={params['w']}&h={params['h']}"
+                
+                road_entry = {
+                    "code": camera_code,
+                    "road_name": camera_data["name"],
+                    "density": camera_data["density"],
+                    "congestion_level": camera_data["congestion_level"],
+                    "critical_density": camera_data["critical_density"],
+                    "composition": camera_data["composition"],
+                    "camera_url": camera_url
+                }
+                sorted_densities["roads"].append(road_entry)
+            
+            # Sort by road name
+            sorted_densities["roads"] = sorted(sorted_densities["roads"], key=lambda x: x["road_name"])
+            
+            logger.info("Successfully read and restructured densities data")
+            return jsonify(sorted_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
         return jsonify({

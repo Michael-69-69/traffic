@@ -7,7 +7,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: USE_MODELS
-        value: false
+        value: true
       - key: BASE_DIR
         value: /app
       - key: PORT
