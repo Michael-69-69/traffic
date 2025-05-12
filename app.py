@@ -550,20 +550,39 @@ def density_worker():
 
 # Start the density worker thread
 def start_worker():
+    """Start worker with focus on model loading"""
     try:
-        # Only load models if USE_MODELS is true
-        if USE_MODELS:
-            logger.info("Attempting to load models...")
-            load_models()
+        logger.info("Starting worker - FOCUSING ON MODEL LOADING")
+        
+        # Force load models - this is now our primary focus
+        logger.info("Attempting to load models (forced)...")
+        
+        load_success = load_models()
+        if load_success:
+            logger.info("Models loaded successfully!")
         else:
-            logger.info("Skipping model loading (USE_MODELS=false)")
+            logger.error("Failed to load models! Check logs for details.")
+            
+            # Try to diagnose the issue
+            if not load_dependencies():
+                logger.error("Problem: Dependencies failed to load")
+            elif not os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")):
+                logger.error("Problem: Road model file not found")
+            elif not os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")):
+                logger.error("Problem: Vehicle model file not found")
+            else:
+                logger.error("Problem: Unclear - check model format or TensorFlow compatibility")
         
         # Start the density worker
+        logger.info("Starting density worker thread...")
         density_thread = threading.Thread(target=density_worker, daemon=True)
         density_thread.start()
-        logger.info("Density worker thread started successfully")
+        logger.info("Density worker thread started")
+        
     except Exception as e:
-        logger.error(f"Failed to start density worker: {e}")
+        logger.error(f"Failed to start worker: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 # Flask routes
 @app.route('/')
@@ -750,4 +769,50 @@ def debug():
             "error": "Debug information collection failed",
             "details": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
+
+
+@app.route('/load-models')
+def force_load_models():
+    """Force model loading and return detailed status"""
+    try:
+        load_success = load_models()
+        
+        # Check model loading status
+        road_loaded = _road_model is not None
+        vehicle_loaded = _vehicle_model is not None
+        
+        # Prepare status response
+        status = {
+            "load_attempt_success": load_success,
+            "models_loaded": {
+                "road_model": road_loaded,
+                "vehicle_model": vehicle_loaded
+            },
+            "model_files": {
+                "road_model": {
+                    "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras"))
+                },
+                "vehicle_model": {
+                    "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras"))
+                }
+            },
+            "environment": {
+                "USE_MODELS": USE_MODELS,
+                "BASE_DIR": base_directory
+            },
+            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": error_details,
+            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
