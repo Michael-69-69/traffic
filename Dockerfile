@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libatlas-base-dev \
     libopencv-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -r -u 1001 appuser
 
@@ -60,7 +61,7 @@ USER appuser
 
 # Add healthcheck to align with Render's healthCheckPath
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Command to run application with optimized Gunicorn settings for Render's free tier
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "--workers", "1", "--threads", "1", "--timeout", "120", "--log-level", "info", "app:app"]
+CMD gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 1 --timeout 120 --log-level info app:app
