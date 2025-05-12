@@ -19,7 +19,8 @@ def convert_standalone_keras_to_tf(input_path, output_path=None):
     
     # Load the Keras model
     try:
-        keras_model = tf.keras.models.load_model(input_path, compile=False)
+        custom_objects = {'dice_loss': dice_loss}  # Add custom loss function
+        keras_model = tf.keras.models.load_model(input_path, custom_objects=custom_objects, compile=False)
         logger.info(f"Loaded Keras model from {input_path}")
     except Exception as e:
         logger.error(f"Failed to load Keras model: {e}")
@@ -28,9 +29,21 @@ def convert_standalone_keras_to_tf(input_path, output_path=None):
     # Create output directory
     os.makedirs(output_path, exist_ok=True)
     
-    # Save as SavedModel format
+    # Save as SavedModel format using tf.saved_model.save
     try:
-        tf.keras.models.save_model(keras_model, output_path, save_format="tf")
+        # Create signatures for serving
+        @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, None, 3], dtype=tf.float32)])
+        def serving_fn(input_tensor):
+            return keras_model(input_tensor)
+            
+        # Save with signatures
+        tf.saved_model.save(
+            keras_model,
+            output_path,
+            signatures={
+                'serving_default': serving_fn.get_concrete_function()
+            }
+        )
         logger.info(f"Successfully converted model to SavedModel format at {output_path}")
         
         # Optional: Create metadata file
@@ -38,14 +51,22 @@ def convert_standalone_keras_to_tf(input_path, output_path=None):
             json.dump({
                 "source_model": input_path,
                 "conversion_type": "saved_model",
-                "version": "1.0"
-            }, f)
+                "version": "1.0",
+                "input_signature": "float32 tensor [batch, height, width, 3]"
+            }, f, indent=2)
         logger.info(f"Created metadata at {output_path}/conversion_metadata.json")
         
         return True
     except Exception as e:
         logger.error(f"Failed to convert model to SavedModel format: {e}")
         return False
+
+def dice_loss(y_true, y_pred, smooth=1e-6):
+    """Define dice loss function for model loading"""
+    y_true_f = tf.keras.backend.flatten(y_true)
+    y_pred_f = tf.keras.backend.flatten(y_pred)
+    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
+    return 1 - ((2. * intersection + smooth) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth))
 
 if __name__ == "__main__":
     # Define input model paths
