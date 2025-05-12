@@ -136,107 +136,110 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
     return 1 - ((2. * intersection + smooth) / (_tf.keras.backend.sum(y_true_f) + _tf.keras.backend.sum(y_pred_f) + smooth))
 
 def load_models():
-    """Load ML models with memory optimizations and detailed error logging"""
+    """Load ML models with enhanced error handling and debugging"""
     global _road_model, _vehicle_model
     
-    logger.info("==== MODEL LOADING STARTED ====")
-    
-    if not USE_MODELS:
-        logger.info("Model loading skipped as USE_MODELS is set to false")
-        return True
-    
-    logger.info(f"USE_MODELS is true, proceeding with model loading")
+    logger.info("=============================================")
+    logger.info("LOADING MODELS - FORCED ATTEMPT")
+    logger.info("=============================================")
     
     if not load_dependencies():
-        logger.error("Dependencies not loaded, cannot load models")
+        logger.error("Failed to load dependencies - cannot load models")
         return False
     
     # Define model paths
+    # Override environment variable for models
+    os.environ['USE_MODELS'] = 'true'
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+    os.environ['TF_MEMORY_ALLOCATION'] = '512MB'
+    
+    # Force models to be used regardless of environment variables
+    USE_MODELS = True
+    logger.info("Models will be FORCED to load (USE_MODELS=True)")
+    
+    # Explicitly set base_directory to ensure correct path
+    base_directory = '/app'
+    logger.info(f"Base directory explicitly set to: {base_directory}")
+    
+    # Check if models exist in the expected location
     road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
     vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
     
-    # Check if model files exist with detailed logging
-    logger.info(f"Checking for road model at: {road_model_path}")
-    if not os.path.exists(road_model_path):
-        logger.error(f"Road model file not found at: {road_model_path}")
-        logger.info(f"Files in {base_directory}: {os.listdir(base_directory) if os.path.exists(base_directory) else 'directory not found'}")
-        return False
-    else:
-        model_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2)
-        logger.info(f"Road model found: {road_model_path} ({model_size_mb} MB)")
+    logger.info(f"Checking for model files:")
+    logger.info(f"Road model path: {road_model_path}, exists: {os.path.exists(road_model_path)}")
+    logger.info(f"Vehicle model path: {vehicle_model_path}, exists: {os.path.exists(vehicle_model_path)}")
     
-    logger.info(f"Checking for vehicle model at: {vehicle_model_path}")
-    if not os.path.exists(vehicle_model_path):
-        logger.error(f"Vehicle model file not found at: {vehicle_model_path}")
-        return False
-    else:
-        model_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2)
-        logger.info(f"Vehicle model found: {vehicle_model_path} ({model_size_mb} MB)")
-    
-    # Log TensorFlow memory configuration
-    logger.info(f"TensorFlow memory configuration:")
-    logger.info(f"  TF_MEMORY_ALLOCATION: {os.environ.get('TF_MEMORY_ALLOCATION', 'not set')}")
-    logger.info(f"  TF_FORCE_GPU_ALLOW_GROWTH: {os.environ.get('TF_FORCE_GPU_ALLOW_GROWTH', 'not set')}")
-    logger.info(f"  TF_CPP_MIN_LOG_LEVEL: {os.environ.get('TF_CPP_MIN_LOG_LEVEL', 'not set')}")
-    
+    # Log the contents of the base directory
     try:
-        # Load road segmentation model with memory tracking
-        logger.info("Loading road segmentation model...")
+        logger.info(f"Files in {base_directory}: {os.listdir(base_directory)}")
+    except Exception as e:
+        logger.error(f"Error listing base directory: {e}")
+    
+    # Verify files exist
+    if not os.path.exists(road_model_path):
+        logger.error(f"Road model file NOT FOUND: {road_model_path}")
+        return False
+    else:
+        file_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2)
+        logger.info(f"Road model file FOUND: {road_model_path} ({file_size_mb} MB)")
+    
+    if not os.path.exists(vehicle_model_path):
+        logger.error(f"Vehicle model file NOT FOUND: {vehicle_model_path}")
+        return False
+    else:
+        file_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2)
+        logger.info(f"Vehicle model file FOUND: {vehicle_model_path} ({file_size_mb} MB)")
+    
+    # Try to load road segmentation model
+    logger.info("Loading road segmentation model...")
+    try:
+        # Define custom objects needed for model loading
         custom_objects = {'dice_loss': dice_loss}
         
-        # Log memory usage before loading
-        if psutil:
-            mem_before = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.info(f"Memory usage before road model: {mem_before:.2f} MB")
+        # Load model with optimal settings
+        _road_model = _tf.keras.models.load_model(
+            road_model_path,
+            custom_objects=custom_objects,
+            compile=False  # Don't compile to save memory
+        )
         
-        # Try to load with optimized settings
-        _road_model = _tf.keras.models.load_model(road_model_path, custom_objects=custom_objects, compile=False)
+        logger.info("Road model loaded successfully!")
         
-        # Force model to use less memory by setting specific configuration
-        _road_model.make_predict_function()  # This initializes the model
-        
-        # Log memory usage after loading road model
-        if psutil:
-            mem_after = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.info(f"Memory usage after road model: {mem_after:.2f} MB (Δ: {mem_after - mem_before:.2f} MB)")
-        
-        logger.info("✓ Road segmentation model loaded successfully")
-        
-        # Sleep briefly to let memory settle
+        # Add small delay to let memory settle
         time.sleep(1)
         
-        # Load vehicle detection model with memory tracking
+        # Try to load vehicle detection model
         logger.info("Loading vehicle detection model...")
-        if psutil:
-            mem_before = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.info(f"Memory usage before vehicle model: {mem_before:.2f} MB")
+        _vehicle_model = _tf.keras.models.load_model(
+            vehicle_model_path,
+            custom_objects=custom_objects,
+            compile=False  # Don't compile to save memory
+        )
         
-        _vehicle_model = _tf.keras.models.load_model(vehicle_model_path, custom_objects=custom_objects, compile=False)
-        _vehicle_model.make_predict_function()  # Initialize the model
+        logger.info("Vehicle model loaded successfully!")
         
-        # Log memory usage after loading vehicle model
-        if psutil:
-            mem_after = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.info(f"Memory usage after vehicle model: {mem_after:.2f} MB (Δ: {mem_after - mem_before:.2f} MB)")
+        # Make prediction functions to initialize models
+        logger.info("Initializing model prediction functions...")
+        _road_model.make_predict_function()
+        _vehicle_model.make_predict_function()
         
-        logger.info("✓ Vehicle detection model loaded successfully")
-        logger.info("==== MODEL LOADING COMPLETED SUCCESSFULLY ====")
+        logger.info("=============================================")
+        logger.info("MODELS LOADED SUCCESSFULLY")
+        logger.info("=============================================")
         
-        # Return success
         return True
+        
     except Exception as e:
         logger.error(f"Error loading models: {str(e)}")
         
-        # Print full traceback for detailed debugging
+        # Print full traceback for debugging
         import traceback
         logger.error(traceback.format_exc())
         
-        # Log memory usage on error
-        if psutil:
-            mem_usage = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.error(f"Memory usage at error: {mem_usage:.2f} MB")
+        logger.error("=============================================")
+        logger.error("MODEL LOADING FAILED")
+        logger.error("=============================================")
         
-        logger.error("==== MODEL LOADING FAILED ====")
         return False
 
 def preprocess_image(img):
@@ -357,58 +360,41 @@ def fetch_camera_image(camera_id):
         return None
 
 def analyze_image(image):
-    """Analyze the image with ML models"""
-    if not USE_MODELS or not load_dependencies() or image is None:
-        # Return simulated data if models not used or image is None
+    """Analyze the image with ML models - return only raw density value"""
+    if not load_dependencies() or image is None:
+        # Return fallback data if dependencies aren't loaded or image is None
         return {
-            "density": round(_np.random.uniform(40.0, 70.0), 1),
-            "composition": {
-                "cars": round(_np.random.uniform(55.0, 65.0), 1),
-                "motorcycles": round(_np.random.uniform(30.0, 40.0), 1),
-                "others": round(_np.random.uniform(3.0, 7.0), 1)
-            }
+            "density": 0.0
         }
     
     try:
+        # Skip model analysis if models aren't loaded
+        if _road_model is None or _vehicle_model is None:
+            return {
+                "density": 0.0
+            }
+        
         # Preprocess image
         processed_image = preprocess_image(image)
         if processed_image is None:
-            raise ValueError("Failed to preprocess image")
+            return {
+                "density": 0.0
+            }
         
-        # Use road model to get road segmentation
+        # Use models to get predictions
         road_prediction = _road_model.predict(processed_image, verbose=0)
-        
-        # Use vehicle model to get vehicle types
         vehicle_prediction = _vehicle_model.predict(processed_image, verbose=0)
         
-        # Calculate density based on vehicle prediction
-        # This is a simplified calculation - adjust based on your model's output
+        # Extract value for density - simplified to return raw output
         density = float(_np.mean(vehicle_prediction[0]) * 100)
         
-        # Extract vehicle composition
-        # Assuming vehicle_prediction has channels for different vehicle types
-        # This should be adjusted based on your model's actual output format
-        cars_percentage = float(_np.mean(vehicle_prediction[0][:,:,:,0]) * 100)
-        motorcycles_percentage = float(_np.mean(vehicle_prediction[0][:,:,:,1]) * 100)
-        others_percentage = 100.0 - cars_percentage - motorcycles_percentage
-        
         return {
-            "density": round(density, 1),
-            "composition": {
-                "cars": round(cars_percentage, 1),
-                "motorcycles": round(motorcycles_percentage, 1),
-                "others": round(others_percentage, 1)
-            }
+            "density": round(density, 1)  # Round to 1 decimal place for consistency
         }
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
         return {
-            "density": 50.0,  # Fallback value
-            "composition": {
-                "cars": 60.0,
-                "motorcycles": 35.0,
-                "others": 5.0
-            }
+            "density": 0.0
         }
 
 def fetch_and_process_densities():
@@ -592,64 +578,24 @@ def index():
 @app.route('/densities')
 def get_densities():
     try:
-        # Log the attempt to read densities
-        logger.info(f"Attempting to read densities from {output_json_path}")
-        
         # Check if file exists
         if not os.path.exists(output_json_path):
-            logger.warning(f"Densities file not found at {output_json_path}, creating initial data")
             manage_historical_densities()
         
-        # Try to read the file
+        # Read the file
         with open(output_json_path, 'r', encoding='utf-8') as f:
             densities = json.load(f)
             
-            # Restructure the data to display by road name in a readable format
-            readable_densities = {
-                "timestamp": densities["timestamp"],
-                "roads": []
-            }
-            
-            # Convert cameras dict to sorted list with readable data
+            # Extract just the raw density values by camera code
+            raw_densities = {}
             for camera_code, camera_data in densities["cameras"].items():
-                # Find camera ID for this location
-                camera_id = None
-                for cam_id, cam_name in cameras:
-                    if cam_name == camera_data["name"]:
-                        camera_id = cam_id
-                        break
-                
-                # Construct camera feed URL
-                camera_url = None
-                if camera_id:
-                    params = default_params.copy()
-                    params["id"] = camera_id
-                    camera_url = f"{base_url}?id={camera_id}&bg={params['bg']}&w={params['w']}&h={params['h']}"
-                
-                road_entry = {
-                    "road_name": camera_data["name"],
-                    "density": round(camera_data["density"], 1),
-                    "congestion": f"{round(camera_data['congestion_level'])}%",
-                    "composition": {
-                        "cars": f"{round(camera_data['composition']['cars'])}%",
-                        "motorcycles": f"{round(camera_data['composition']['motorcycles'])}%",
-                        "others": f"{round(camera_data['composition']['others'])}%"
-                    },
-                    "camera_url": camera_url,
-                    "status": "Live" if camera_url else "Offline"
-                }
-                readable_densities["roads"].append(road_entry)
+                raw_densities[camera_code] = camera_data["density"]
             
-            # Sort by road name
-            readable_densities["roads"] = sorted(readable_densities["roads"], key=lambda x: x["road_name"])
-            
-            logger.info("Successfully read and formatted densities data")
-            return jsonify(readable_densities)
+            return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
         return jsonify({
-            "error": "Could not read densities data",
-            "details": str(e)
+            "error": str(e)
         }), 500
 
 @app.route('/status')

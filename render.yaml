@@ -9,11 +9,11 @@ services:
       - key: USE_MODELS
         value: "true"
       - key: BASE_DIR
-        value: /app
+        value: "/app"
       - key: PORT
-        value: 10000
+        value: "10000"
       - key: CAMERA_URL_TEMPLATE
-        value: https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camera_id}
+        value: "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camera_id}"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: TF_CPP_MIN_LOG_LEVEL
