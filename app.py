@@ -137,11 +137,7 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
 
 def load_models():
     """Load ML models with enhanced error handling and debugging"""
-    global USE_MODELS, _road_model, _vehicle_model
-    
-    # Force models to be used
-    USE_MODELS = True
-    logger.info("Models will be FORCED to load (USE_MODELS=True)")
+    global _road_model, _vehicle_model
     
     logger.info("=============================================")
     logger.info("LOADING MODELS - FORCED ATTEMPT")
@@ -151,27 +147,42 @@ def load_models():
         logger.error("Failed to load dependencies - cannot load models")
         return False
     
-    # Define model paths with fallbacks
+    # Define model paths (use converted SavedModel format)
+    base_directory = os.environ.get('BASE_DIR', '/app')
     road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
     vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
+    
+    # Fallback to .keras files if converted models don't exist
     if not os.path.exists(road_model_path):
+        logger.warning(f"Converted road model not found at {road_model_path}, falling back to .keras")
         road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
     if not os.path.exists(vehicle_model_path):
+        logger.warning(f"Converted vehicle model not found at {vehicle_model_path}, falling back to .keras")
         vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
+    
+    logger.info(f"Checking for model files:")
+    logger.info(f"Road model path: {road_model_path}, exists: {os.path.exists(road_model_path)}")
+    logger.info(f"Vehicle model path: {vehicle_model_path}, exists: {os.path.exists(vehicle_model_path)}")
+    
+    # Log the contents of the base directory
+    try:
+        logger.info(f"Files in {base_directory}: {os.listdir(base_directory)}")
+    except Exception as e:
+        logger.error(f"Error listing base directory: {e}")
     
     # Verify files exist
     if not os.path.exists(road_model_path):
         logger.error(f"Road model file NOT FOUND: {road_model_path}")
         return False
     else:
-        file_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2)
+        file_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2) if os.path.isfile(road_model_path) else "N/A (directory)"
         logger.info(f"Road model file FOUND: {road_model_path} ({file_size_mb} MB)")
     
     if not os.path.exists(vehicle_model_path):
         logger.error(f"Vehicle model file NOT FOUND: {vehicle_model_path}")
         return False
     else:
-        file_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2)
+        file_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2) if os.path.isfile(vehicle_model_path) else "N/A (directory)"
         logger.info(f"Vehicle model file FOUND: {vehicle_model_path} ({file_size_mb} MB)")
     
     # Try to load road segmentation model
