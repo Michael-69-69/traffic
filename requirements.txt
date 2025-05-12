@@ -5,3 +5,4 @@ numpy==1.23.5
 tensorflow-cpu==2.12.0
 gunicorn==22.0.0
 h5py==3.9.0
+psutil==5.9.5
