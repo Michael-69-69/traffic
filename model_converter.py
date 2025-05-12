@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import tensorflow as tf
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -8,28 +9,43 @@ logger = logging.getLogger(__name__)
 
 def convert_standalone_keras_to_tf(input_path, output_path=None):
     """
-    Memory-efficient stub for model conversion
-    In this optimized version, we're just creating a compatibility layer
+    Convert a standalone Keras model to TensorFlow SavedModel format
     """
     if output_path is None:
         base, ext = os.path.splitext(input_path)
-        output_path = f"{base}_tf{ext}"
+        output_path = f"{base}_tf"
     
-    logger.info(f"Model conversion optimized: {input_path} -> {output_path}")
+    logger.info(f"Model conversion started: {input_path} -> {output_path}")
     
-    # Create directory for SavedModel format if it doesn't exist
+    # Load the Keras model
+    try:
+        keras_model = tf.keras.models.load_model(input_path, compile=False)
+        logger.info(f"Loaded Keras model from {input_path}")
+    except Exception as e:
+        logger.error(f"Failed to load Keras model: {e}")
+        return False
+    
+    # Create output directory
     os.makedirs(output_path, exist_ok=True)
     
-    # Create a minimal metadata file to indicate conversion happened
-    with open(os.path.join(output_path, "conversion_metadata.json"), "w") as f:
-        json.dump({
-            "source_model": input_path,
-            "conversion_type": "memory_optimized",
-            "version": "1.0"
-        }, f)
-    
-    logger.info(f"Created minimal model reference at {output_path}")
-    return True
+    # Save as SavedModel format
+    try:
+        tf.keras.models.save_model(keras_model, output_path, save_format="tf")
+        logger.info(f"Successfully converted model to SavedModel format at {output_path}")
+        
+        # Optional: Create metadata file
+        with open(os.path.join(output_path, "conversion_metadata.json"), "w") as f:
+            json.dump({
+                "source_model": input_path,
+                "conversion_type": "saved_model",
+                "version": "1.0"
+            }, f)
+        logger.info(f"Created metadata at {output_path}/conversion_metadata.json")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to convert model to SavedModel format: {e}")
+        return False
 
 if __name__ == "__main__":
     # Define input model paths
@@ -45,6 +61,6 @@ if __name__ == "__main__":
     success2 = convert_standalone_keras_to_tf(vehicle_model_path, vehicle_model_output)
     
     if success1 and success2:
-        logger.info("Models prepared for memory-efficient loading")
+        logger.info("Models successfully converted to SavedModel format")
     else:
-        logger.warning("Model preparation incomplete")
+        logger.warning("Model conversion incomplete")

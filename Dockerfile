@@ -41,8 +41,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY model_converter.py app.py ./
 COPY unet_road_segmentation.keras unet_multi_classV1.keras ./
 
-# Run model conversion during build to ensure models are in SavedModel format
-RUN python model_converter.py
+# Run model conversion during build and verify output
+RUN python model_converter.py && \
+    if [ ! -f unet_road_segmentation_tf/saved_model.pb ] || [ ! -f unet_multi_classV1_tf/saved_model.pb ]; then \
+        echo "Error: SavedModel files not generated" && exit 1; \
+    fi
 
 # Create necessary directories and initialize JSON files with proper ownership
 RUN mkdir -p /app/densities && \

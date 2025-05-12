@@ -334,7 +334,7 @@ def manage_historical_densities():
     return sample_critical_densities, today_densities
 
 def fetch_camera_image(camera_id):
-    """Fetch camera image from the API"""
+    """Fetch camera image from the API with enhanced error handling"""
     if not load_dependencies():
         return None
         
@@ -343,13 +343,22 @@ def fetch_camera_image(camera_id):
         logger.info(f"Fetching image from {url}")
         
         response = _session.get(url, timeout=10)
-        response.raise_for_status()
+        response.raise_for_status()  # Raises an HTTPError for bad responses
         
         # Convert response to image
         image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
         image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
         
+        if image is None:
+            logger.warning(f"Failed to decode image from {url}")
+            return None
         return image
+    except _requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.error(f"403 Forbidden for {url}: Check API key or server permissions")
+        else:
+            logger.error(f"HTTP error fetching camera image for {camera_id}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error fetching camera image for {camera_id}: {e}")
         return None
@@ -536,7 +545,7 @@ def density_worker():
                 logger.info("Starting density processing cycle")
                 fetch_and_process_densities()
                 logger.info("Density processing cycle completed")
-                time.sleep(60)  # Check every minute
+                time.sleep(300)  # Increase to 5 minutes to avoid rate limiting
             except Exception as e:
                 logger.error(f"Error in density worker cycle: {e}")
                 time.sleep(30)  # Shorter retry interval on error
