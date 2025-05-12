@@ -147,19 +147,11 @@ def load_models():
         logger.error("Failed to load dependencies - cannot load models")
         return False
     
-    # Define model paths (use converted SavedModel format)
-    base_directory = os.environ.get('BASE_DIR', '/app')
+    # Define model paths - use TF SavedModel directories
     road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
     vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
     
-    # Fallback to .keras files if converted models don't exist
-    if not os.path.exists(road_model_path):
-        logger.warning(f"Converted road model not found at {road_model_path}, falling back to .keras")
-        road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
-    if not os.path.exists(vehicle_model_path):
-        logger.warning(f"Converted vehicle model not found at {vehicle_model_path}, falling back to .keras")
-        vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
-    
+    # Check paths
     logger.info(f"Checking for model files:")
     logger.info(f"Road model path: {road_model_path}, exists: {os.path.exists(road_model_path)}")
     logger.info(f"Vehicle model path: {vehicle_model_path}, exists: {os.path.exists(vehicle_model_path)}")
@@ -170,34 +162,27 @@ def load_models():
     except Exception as e:
         logger.error(f"Error listing base directory: {e}")
     
-    # Verify files exist
-    if not os.path.exists(road_model_path):
-        logger.error(f"Road model file NOT FOUND: {road_model_path}")
+    # Check that the SavedModel files exist in the directories
+    road_saved_model = os.path.join(road_model_path, "saved_model.pb")
+    vehicle_saved_model = os.path.join(vehicle_model_path, "saved_model.pb")
+    
+    if not os.path.exists(road_saved_model):
+        logger.error(f"Road model SavedModel file NOT FOUND: {road_saved_model}")
         return False
     else:
-        file_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2) if os.path.isfile(road_model_path) else "N/A (directory)"
-        logger.info(f"Road model file FOUND: {road_model_path} ({file_size_mb} MB)")
-    
-    if not os.path.exists(vehicle_model_path):
-        logger.error(f"Vehicle model file NOT FOUND: {vehicle_model_path}")
+        logger.info(f"Road model SavedModel file FOUND: {road_saved_model}")
+        
+    if not os.path.exists(vehicle_saved_model):
+        logger.error(f"Vehicle model SavedModel file NOT FOUND: {vehicle_saved_model}")
         return False
     else:
-        file_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2) if os.path.isfile(vehicle_model_path) else "N/A (directory)"
-        logger.info(f"Vehicle model file FOUND: {vehicle_model_path} ({file_size_mb} MB)")
+        logger.info(f"Vehicle model SavedModel file FOUND: {vehicle_saved_model}")
     
-    # Try to load road segmentation model
+    # Try to load using tf.saved_model.load instead of keras.models.load_model
     logger.info("Loading road segmentation model...")
     try:
-        # Define custom objects needed for model loading
-        custom_objects = {'dice_loss': dice_loss}
-        
-        # Load model with optimal settings
-        _road_model = _tf.keras.models.load_model(
-            road_model_path,
-            custom_objects=custom_objects,
-            compile=False  # Don't compile to save memory
-        )
-        
+        # Load models using tf.saved_model.load which is appropriate for SavedModel format
+        _road_model = _tf.saved_model.load(road_model_path)
         logger.info("Road model loaded successfully!")
         
         # Add small delay to let memory settle
@@ -205,25 +190,14 @@ def load_models():
         
         # Try to load vehicle detection model
         logger.info("Loading vehicle detection model...")
-        _vehicle_model = _tf.keras.models.load_model(
-            vehicle_model_path,
-            custom_objects=custom_objects,
-            compile=False  # Don't compile to save memory
-        )
-        
+        _vehicle_model = _tf.saved_model.load(vehicle_model_path)
         logger.info("Vehicle model loaded successfully!")
-        
-        # Make prediction functions to initialize models
-        logger.info("Initializing model prediction functions...")
-        _road_model.make_predict_function()
-        _vehicle_model.make_predict_function()
         
         logger.info("=============================================")
         logger.info("MODELS LOADED SUCCESSFULLY")
         logger.info("=============================================")
         
         return True
-        
     except Exception as e:
         logger.error(f"Error loading models: {str(e)}")
         
@@ -364,9 +338,9 @@ def fetch_camera_image(camera_id):
         return None
 
 def analyze_image(image):
-    """Analyze the image with ML models - return only raw density value"""
+    """Analyze the image with ML models - returns only density value"""
     if not load_dependencies() or image is None:
-        # Return fallback data if dependencies aren't loaded or image is None
+        # Return zero if dependencies aren't loaded or image is None
         return {
             "density": 0.0
         }
@@ -374,6 +348,7 @@ def analyze_image(image):
     try:
         # Skip model analysis if models aren't loaded
         if _road_model is None or _vehicle_model is None:
+            logger.warning("Models not loaded, using fallback values")
             return {
                 "density": 0.0
             }
@@ -385,45 +360,34 @@ def analyze_image(image):
                 "density": 0.0
             }
         
-        # Use models to get predictions
-        road_prediction = _road_model.predict(processed_image, verbose=0)
-        vehicle_prediction = _vehicle_model.predict(processed_image, verbose=0)
+        # Use models with the correct signature for SavedModel format
+        # SavedModel format uses the 'serving_default' signature
+        road_prediction = _road_model.signatures['serving_default'](_tf.constant(processed_image))
+        
+        vehicle_prediction = _vehicle_model.signatures['serving_default'](_tf.constant(processed_image))
+        vehicle_output = list(vehicle_prediction.values())[0]
         
         # Extract value for density - simplified to return raw output
-        density = float(_np.mean(vehicle_prediction[0]) * 100)
+        # Convert to numpy array for easier manipulation
+        vehicle_output_np = vehicle_output.numpy()
+        density = float(_np.mean(vehicle_output_np) * 100)
         
+        # Just return the density value
         return {
-            "density": round(density, 1)  # Round to 1 decimal place for consistency
+            "density": round(density, 1)
         }
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {
             "density": 0.0
         }
 
 def fetch_and_process_densities():
-    """Fetch and process density data from cameras"""
-    # Load critical densities
-    critical_densities = {}
-    if os.path.exists(critical_densities_path):
-        try:
-            with open(critical_densities_path, 'r', encoding='utf-8') as f:
-                critical_densities = json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading critical_densities.json: {e}")
-    
-    # Load today's densities
-    today_densities = {}
-    if os.path.exists(today_densities_path):
-        try:
-            with open(today_densities_path, 'r', encoding='utf-8') as f:
-                today_densities = json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading today_densities.json: {e}")
-    
+    """Fetch and process density data from cameras - simplified version"""
     # Current timestamp
-    current_time = datetime.now()
-    timestamp_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+    timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     # Initialize results
     results = {
@@ -439,63 +403,27 @@ def fetch_and_process_densities():
             # Get camera code
             camera_code = camera_mapping.get(camera_name, camera_name)
             
-            # Get critical density
-            critical_density = critical_densities.get(camera_code, 80.0)
-            
             # For simulated data mode or when image fetch fails
             if not USE_MODELS:
-                # Simulate density value with small variation
-                base_density = 50.0
-                if camera_code in today_densities and today_densities[camera_code]:
-                    # Get the most recent density value
-                    recent_densities = list(today_densities[camera_code].values())
-                    if recent_densities:
-                        base_density = recent_densities[-1]
-                
-                # Add small random variation to simulate changing traffic
-                if _np is None and not load_dependencies():
-                    import random
-                    density = base_density + random.uniform(-5.0, 5.0)
-                    density = max(10.0, min(95.0, density))  # Keep within reasonable range
-                else:
-                    density = base_density + _np.random.uniform(-5.0, 5.0)
-                    density = max(10.0, min(95.0, density))  # Keep within reasonable range
-                
-                analysis_result = {
-                    "density": round(density, 1),
-                    "composition": {
-                        "cars": round(_np.random.uniform(55.0, 65.0) if _np else 60.0, 1),
-                        "motorcycles": round(_np.random.uniform(30.0, 40.0) if _np else 35.0, 1),
-                        "others": round(_np.random.uniform(3.0, 7.0) if _np else 5.0, 1)
-                    }
-                }
+                # Simulate density value
+                density = _np.random.uniform(0.0, 100.0) if _np else 50.0
             else:
                 # Fetch camera image
                 image = fetch_camera_image(camera_id)
                 
                 # Analyze image
                 analysis_result = analyze_image(image)
+                
+                # Get density value
+                density = analysis_result["density"]
             
-            # Calculate congestion level
-            density = analysis_result["density"]
-            congestion_level = (density / critical_density) * 100 if critical_density > 0 else 0
-            congestion_level = round(min(100.0, congestion_level), 1)
-            
-            # Update today's densities
-            if camera_code not in today_densities:
-                today_densities[camera_code] = {}
-            today_densities[camera_code][timestamp_str] = density
-            
-            # Add to results
+            # Add to results - just the density value and name for internal reference
             results["cameras"][camera_code] = {
                 "name": camera_name,
-                "density": density,
-                "congestion_level": congestion_level,
-                "critical_density": critical_density,
-                "composition": analysis_result["composition"]
+                "density": density
             }
             
-            logger.info(f"Processed camera {camera_name}: density={density}, congestion={congestion_level}")
+            logger.info(f"Processed camera {camera_name}: density={density}")
             
         except Exception as e:
             logger.error(f"Error processing camera {camera_name}: {e}")
@@ -503,23 +431,8 @@ def fetch_and_process_densities():
             # Add default values on error
             results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
                 "name": camera_name,
-                "density": 0.0,
-                "congestion_level": 0.0,
-                "critical_density": critical_densities.get(camera_mapping.get(camera_name, camera_name), 80.0),
-                "composition": {
-                    "cars": 0.0,
-                    "motorcycles": 0.0,
-                    "others": 0.0
-                },
-                "error": str(e)
+                "density": 0.0
             }
-    
-    # Save today's densities
-    try:
-        with open(today_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(today_densities, f, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Error saving today_densities.json: {e}")
     
     # Save results
     try:
