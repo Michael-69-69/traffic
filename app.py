@@ -137,7 +137,11 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
 
 def load_models():
     """Load ML models with enhanced error handling and debugging"""
-    global _road_model, _vehicle_model
+    global USE_MODELS, _road_model, _vehicle_model
+    
+    # Force models to be used
+    USE_MODELS = True
+    logger.info("Models will be FORCED to load (USE_MODELS=True)")
     
     logger.info("=============================================")
     logger.info("LOADING MODELS - FORCED ATTEMPT")
@@ -147,33 +151,13 @@ def load_models():
         logger.error("Failed to load dependencies - cannot load models")
         return False
     
-    # Define model paths
-    # Override environment variable for models
-    os.environ['USE_MODELS'] = 'true'
-    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-    os.environ['TF_MEMORY_ALLOCATION'] = '512MB'
-    
-    # Force models to be used regardless of environment variables
-    USE_MODELS = True
-    logger.info("Models will be FORCED to load (USE_MODELS=True)")
-    
-    # Explicitly set base_directory to ensure correct path
-    base_directory = '/app'
-    logger.info(f"Base directory explicitly set to: {base_directory}")
-    
-    # Check if models exist in the expected location
-    road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
-    vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
-    
-    logger.info(f"Checking for model files:")
-    logger.info(f"Road model path: {road_model_path}, exists: {os.path.exists(road_model_path)}")
-    logger.info(f"Vehicle model path: {vehicle_model_path}, exists: {os.path.exists(vehicle_model_path)}")
-    
-    # Log the contents of the base directory
-    try:
-        logger.info(f"Files in {base_directory}: {os.listdir(base_directory)}")
-    except Exception as e:
-        logger.error(f"Error listing base directory: {e}")
+    # Define model paths with fallbacks
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
+    vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
+    if not os.path.exists(road_model_path):
+        road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
+    if not os.path.exists(vehicle_model_path):
+        vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
     
     # Verify files exist
     if not os.path.exists(road_model_path):
