@@ -136,13 +136,17 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
     return 1 - ((2. * intersection + smooth) / (_tf.keras.backend.sum(y_true_f) + _tf.keras.backend.sum(y_pred_f) + smooth))
 
 def load_models():
-    """Load ML models with memory optimizations"""
+    """Load ML models with memory optimizations and detailed error logging"""
     global _road_model, _vehicle_model
+    
+    logger.info("==== MODEL LOADING STARTED ====")
     
     if not USE_MODELS:
         logger.info("Model loading skipped as USE_MODELS is set to false")
         return True
-        
+    
+    logger.info(f"USE_MODELS is true, proceeding with model loading")
+    
     if not load_dependencies():
         logger.error("Dependencies not loaded, cannot load models")
         return False
@@ -151,36 +155,88 @@ def load_models():
     road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
     vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1.keras")
     
-    # Check if model files exist
-    if not os.path.exists(road_model_path) or not os.path.exists(vehicle_model_path):
-        logger.error(f"Model files not found: {road_model_path} or {vehicle_model_path}")
+    # Check if model files exist with detailed logging
+    logger.info(f"Checking for road model at: {road_model_path}")
+    if not os.path.exists(road_model_path):
+        logger.error(f"Road model file not found at: {road_model_path}")
+        logger.info(f"Files in {base_directory}: {os.listdir(base_directory) if os.path.exists(base_directory) else 'directory not found'}")
         return False
+    else:
+        model_size_mb = round(os.path.getsize(road_model_path) / (1024 * 1024), 2)
+        logger.info(f"Road model found: {road_model_path} ({model_size_mb} MB)")
     
-    logger.info("Loading road segmentation model...")
+    logger.info(f"Checking for vehicle model at: {vehicle_model_path}")
+    if not os.path.exists(vehicle_model_path):
+        logger.error(f"Vehicle model file not found at: {vehicle_model_path}")
+        return False
+    else:
+        model_size_mb = round(os.path.getsize(vehicle_model_path) / (1024 * 1024), 2)
+        logger.info(f"Vehicle model found: {vehicle_model_path} ({model_size_mb} MB)")
+    
+    # Log TensorFlow memory configuration
+    logger.info(f"TensorFlow memory configuration:")
+    logger.info(f"  TF_MEMORY_ALLOCATION: {os.environ.get('TF_MEMORY_ALLOCATION', 'not set')}")
+    logger.info(f"  TF_FORCE_GPU_ALLOW_GROWTH: {os.environ.get('TF_FORCE_GPU_ALLOW_GROWTH', 'not set')}")
+    logger.info(f"  TF_CPP_MIN_LOG_LEVEL: {os.environ.get('TF_CPP_MIN_LOG_LEVEL', 'not set')}")
     
     try:
-        # Load models with optimized settings
+        # Load road segmentation model with memory tracking
+        logger.info("Loading road segmentation model...")
         custom_objects = {'dice_loss': dice_loss}
+        
+        # Log memory usage before loading
+        if psutil:
+            mem_before = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.info(f"Memory usage before road model: {mem_before:.2f} MB")
+        
+        # Try to load with optimized settings
         _road_model = _tf.keras.models.load_model(road_model_path, custom_objects=custom_objects, compile=False)
         
         # Force model to use less memory by setting specific configuration
         _road_model.make_predict_function()  # This initializes the model
         
-        logger.info("Road segmentation model loaded")
+        # Log memory usage after loading road model
+        if psutil:
+            mem_after = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.info(f"Memory usage after road model: {mem_after:.2f} MB (Δ: {mem_after - mem_before:.2f} MB)")
+        
+        logger.info("✓ Road segmentation model loaded successfully")
         
         # Sleep briefly to let memory settle
         time.sleep(1)
         
+        # Load vehicle detection model with memory tracking
         logger.info("Loading vehicle detection model...")
+        if psutil:
+            mem_before = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.info(f"Memory usage before vehicle model: {mem_before:.2f} MB")
+        
         _vehicle_model = _tf.keras.models.load_model(vehicle_model_path, custom_objects=custom_objects, compile=False)
         _vehicle_model.make_predict_function()  # Initialize the model
         
-        logger.info("Vehicle detection model loaded")
+        # Log memory usage after loading vehicle model
+        if psutil:
+            mem_after = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.info(f"Memory usage after vehicle model: {mem_after:.2f} MB (Δ: {mem_after - mem_before:.2f} MB)")
+        
+        logger.info("✓ Vehicle detection model loaded successfully")
+        logger.info("==== MODEL LOADING COMPLETED SUCCESSFULLY ====")
         
         # Return success
         return True
     except Exception as e:
-        logger.error(f"Error loading models: {e}")
+        logger.error(f"Error loading models: {str(e)}")
+        
+        # Print full traceback for detailed debugging
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Log memory usage on error
+        if psutil:
+            mem_usage = psutil.Process().memory_info().rss / 1024 / 1024
+            logger.error(f"Memory usage at error: {mem_usage:.2f} MB")
+        
+        logger.error("==== MODEL LOADING FAILED ====")
         return False
 
 def preprocess_image(img):
@@ -548,15 +604,15 @@ def get_densities():
         with open(output_json_path, 'r', encoding='utf-8') as f:
             densities = json.load(f)
             
-            # Restructure the data to display by road name
-            sorted_densities = {
+            # Restructure the data to display by road name in a readable format
+            readable_densities = {
                 "timestamp": densities["timestamp"],
                 "roads": []
             }
             
-            # Convert cameras dict to sorted list with camera feed URLs
+            # Convert cameras dict to sorted list with readable data
             for camera_code, camera_data in densities["cameras"].items():
-                # Find camera ID from the cameras list
+                # Find camera ID for this location
                 camera_id = None
                 for cam_id, cam_name in cameras:
                     if cam_name == camera_data["name"]:
@@ -571,21 +627,24 @@ def get_densities():
                     camera_url = f"{base_url}?id={camera_id}&bg={params['bg']}&w={params['w']}&h={params['h']}"
                 
                 road_entry = {
-                    "code": camera_code,
                     "road_name": camera_data["name"],
-                    "density": camera_data["density"],
-                    "congestion_level": camera_data["congestion_level"],
-                    "critical_density": camera_data["critical_density"],
-                    "composition": camera_data["composition"],
-                    "camera_url": camera_url
+                    "density": round(camera_data["density"], 1),
+                    "congestion": f"{round(camera_data['congestion_level'])}%",
+                    "composition": {
+                        "cars": f"{round(camera_data['composition']['cars'])}%",
+                        "motorcycles": f"{round(camera_data['composition']['motorcycles'])}%",
+                        "others": f"{round(camera_data['composition']['others'])}%"
+                    },
+                    "camera_url": camera_url,
+                    "status": "Live" if camera_url else "Offline"
                 }
-                sorted_densities["roads"].append(road_entry)
+                readable_densities["roads"].append(road_entry)
             
             # Sort by road name
-            sorted_densities["roads"] = sorted(sorted_densities["roads"], key=lambda x: x["road_name"])
+            readable_densities["roads"] = sorted(readable_densities["roads"], key=lambda x: x["road_name"])
             
-            logger.info("Successfully read and restructured densities data")
-            return jsonify(sorted_densities)
+            logger.info("Successfully read and formatted densities data")
+            return jsonify(readable_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
         return jsonify({
@@ -661,3 +720,88 @@ if __name__ == "__main__":
     
     # Run the Flask app
     app.run(host='0.0.0.0', port=port, debug=True)
+
+
+@app.route('/debug')
+def debug():
+    """Debug endpoint to check environment variables and model files"""
+    try:
+        # Check for model files
+        model_info = {
+            "unet_road_segmentation.keras": {
+                "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")),
+                "size_mb": round(os.path.getsize(os.path.join(base_directory, "unet_road_segmentation.keras")) / (1024 * 1024), 2) if os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")) else None,
+                "last_modified": datetime.fromtimestamp(os.path.getmtime(os.path.join(base_directory, "unet_road_segmentation.keras"))).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")) else None,
+                "tf_converted_exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras_tf"))
+            },
+            "unet_multi_classV1.keras": {
+                "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")),
+                "size_mb": round(os.path.getsize(os.path.join(base_directory, "unet_multi_classV1.keras")) / (1024 * 1024), 2) if os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")) else None,
+                "last_modified": datetime.fromtimestamp(os.path.getmtime(os.path.join(base_directory, "unet_multi_classV1.keras"))).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")) else None,
+                "tf_converted_exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras_tf"))
+            }
+        }
+        
+        # Get environment variables
+        env_vars = {
+            "USE_MODELS_RAW": os.environ.get('USE_MODELS', 'not set'),
+            "USE_MODELS_PROCESSED": USE_MODELS,
+            "BASE_DIR": os.environ.get('BASE_DIR', 'not set'),
+            "TF_MEMORY_ALLOCATION": os.environ.get('TF_MEMORY_ALLOCATION', 'not set'),
+            "TF_FORCE_GPU_ALLOW_GROWTH": os.environ.get('TF_FORCE_GPU_ALLOW_GROWTH', 'not set'),
+            "PORT": os.environ.get('PORT', 'not set'),
+            "CAMERA_URL_TEMPLATE": os.environ.get('CAMERA_URL_TEMPLATE', 'not set')
+        }
+        
+        # Check densities directory and files
+        densities_info = {
+            "densities_dir_exists": os.path.exists(densities_dir),
+            "today_densities_exists": os.path.exists(today_densities_path),
+            "yesterday_max_densities_exists": os.path.exists(yesterday_max_densities_path),
+            "critical_densities_exists": os.path.exists(critical_densities_path),
+            "output_json_exists": os.path.exists(output_json_path)
+        }
+        
+        # List files in base directory
+        try:
+            files_in_base_dir = os.listdir(base_directory)
+        except Exception as e:
+            files_in_base_dir = f"Error listing files: {str(e)}"
+        
+        # Check model loading status
+        model_load_status = {
+            "road_model_loaded": _road_model is not None,
+            "vehicle_model_loaded": _vehicle_model is not None,
+            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None
+        }
+        
+        # Get system resources
+        import psutil
+        try:
+            memory_info = {
+                "total_memory_mb": round(psutil.virtual_memory().total / (1024 * 1024), 2),
+                "available_memory_mb": round(psutil.virtual_memory().available / (1024 * 1024), 2),
+                "used_memory_percent": psutil.virtual_memory().percent,
+                "cpu_percent": psutil.cpu_percent(interval=0.1),
+                "process_memory_mb": round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 2)
+            }
+        except Exception as e:
+            memory_info = f"Error getting system resources: {str(e)}"
+        
+        return jsonify({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "model_files": model_info,
+            "model_load_status": model_load_status,
+            "environment_variables": env_vars,
+            "base_directory": base_directory,
+            "files_in_base_directory": files_in_base_dir,
+            "densities_info": densities_info,
+            "system_resources": memory_info
+        })
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        return jsonify({
+            "error": "Debug information collection failed",
+            "details": str(e),
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
