@@ -66,7 +66,7 @@ cameras = [
 ]
 
 # Camera URL template - Update with your actual base URL
-CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://api.example.com/cameras/{camera_id}/snapshot')
+CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
 # Lazy-load TensorFlow only when needed
 _tf = None
