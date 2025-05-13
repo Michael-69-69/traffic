@@ -212,7 +212,7 @@ def load_models():
         return False
 
 def preprocess_image(img):
-    """Preprocess image for model input"""
+    """Preprocess image for model input with explicit float32 type"""
     try:
         if not load_dependencies():
             return None
@@ -227,7 +227,10 @@ def preprocess_image(img):
         
         # Resize to expected dimensions
         img = _cv2.resize(img, (128, 128))
-        img = img / 255.0
+        
+        # Convert to float32 explicitly (this is the key fix)
+        img = img.astype('float32') / 255.0
+        
         img = _np.expand_dims(img, axis=0)
         return img
     except Exception as e:
@@ -368,7 +371,7 @@ def fetch_camera_image(camera_id):
         return None
 
 def analyze_image(image):
-    """Analyze the image with ML models - returns only density value"""
+    """Analyze the image with ML models - with data type correction"""
     if not load_dependencies() or image is None:
         # Return zero if dependencies aren't loaded or image is None
         return {
@@ -383,29 +386,84 @@ def analyze_image(image):
                 "density": 0.0
             }
         
-        # Preprocess image
+        # Preprocess image with correct float32 data type
         processed_image = preprocess_image(image)
         if processed_image is None:
             return {
                 "density": 0.0
             }
         
-        # Use models with the correct signature for SavedModel format
-        # SavedModel format uses the 'serving_default' signature
-        road_prediction = _road_model.signatures['serving_default'](_tf.constant(processed_image))
+        # Log data type information for debugging
+        logger.info(f"Processed image shape: {processed_image.shape}, dtype: {processed_image.dtype}")
         
-        vehicle_prediction = _vehicle_model.signatures['serving_default'](_tf.constant(processed_image))
-        vehicle_output = list(vehicle_prediction.values())[0]
+        # Ensure image is float32 before passing to the model
+        if processed_image.dtype != 'float32':
+            processed_image = processed_image.astype('float32')
+            logger.info(f"Converted image to float32")
         
-        # Extract value for density - simplified to return raw output
-        # Convert to numpy array for easier manipulation
-        vehicle_output_np = vehicle_output.numpy()
-        density = float(_np.mean(vehicle_output_np) * 100)
+        # Use models with correct data type for input
+        input_tensor = _tf.convert_to_tensor(processed_image, dtype=_tf.float32)
+        logger.info(f"Input tensor shape: {input_tensor.shape}, dtype: {input_tensor.dtype}")
         
-        # Just return the density value
-        return {
-            "density": round(density, 1)
-        }
+        try:
+            # Use named arguments to match the signature
+            road_prediction = _road_model.signatures['serving_default'](input_tensor=input_tensor)
+            # Extract the output tensor from the prediction result
+            road_output = list(road_prediction.values())[0]
+            
+            vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor=input_tensor)
+            vehicle_output = list(vehicle_prediction.values())[0]
+            
+            # Extract value for density
+            vehicle_output_np = vehicle_output.numpy()
+            density = float(_np.mean(vehicle_output_np) * 100)
+            
+            # Just return the density value
+            return {
+                "density": round(density, 1)
+            }
+        except Exception as e:
+            logger.error(f"Error during model prediction: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Try alternative approach with fewer arguments
+            try:
+                logger.info("Trying alternative prediction approach...")
+                # Get input signature information
+                input_sig = _road_model.signatures['serving_default'].structured_input_signature
+                logger.info(f"Model input signature: {input_sig}")
+                
+                # Create a dictionary of inputs based on the signature
+                inputs_dict = {}
+                if len(input_sig) > 1 and len(input_sig[1]) > 0:
+                    input_name = list(input_sig[1].keys())[0]
+                    inputs_dict[input_name] = input_tensor
+                else:
+                    # If no named inputs, use positional argument
+                    road_prediction = _road_model.signatures['serving_default'](input_tensor)
+                    vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor)
+                    
+                if inputs_dict:
+                    logger.info(f"Using input dict: {list(inputs_dict.keys())}")
+                    road_prediction = _road_model.signatures['serving_default'](**inputs_dict)
+                    vehicle_prediction = _vehicle_model.signatures['serving_default'](**inputs_dict)
+                
+                # Extract outputs and calculate density
+                vehicle_output = list(vehicle_prediction.values())[0]
+                vehicle_output_np = vehicle_output.numpy()
+                density = float(_np.mean(vehicle_output_np) * 100)
+                
+                return {
+                    "density": round(density, 1)
+                }
+            except Exception as nested_e:
+                logger.error(f"Alternative approach also failed: {nested_e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return {
+                    "density": 0.0
+                }
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
         import traceback
@@ -779,4 +837,96 @@ def force_load_models():
             "error": str(e),
             "traceback": error_details,
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
+
+
+@app.route('/debug-model')
+def debug_model():
+    """Debug endpoint to check model signature and test with random data"""
+    try:
+        if not load_dependencies():
+            return jsonify({
+                "error": "Dependencies not loaded",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }), 500
+        
+        if _road_model is None or _vehicle_model is None:
+            return jsonify({
+                "error": "Models not loaded",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }), 500
+        
+        # Get signature information for road model
+        road_sig = _road_model.signatures['serving_default'].structured_input_signature
+        road_output_sig = _road_model.signatures['serving_default'].structured_outputs
+        
+        # Get signature information for vehicle model
+        vehicle_sig = _vehicle_model.signatures['serving_default'].structured_input_signature
+        vehicle_output_sig = _vehicle_model.signatures['serving_default'].structured_outputs
+        
+        # Create a simple test input
+        test_input = _np.zeros((1, 128, 128, 3), dtype='float32')
+        tf_input = _tf.convert_to_tensor(test_input, dtype=_tf.float32)
+        
+        # Test prediction (don't log errors, just check if it works)
+        road_success = False
+        vehicle_success = False
+        road_error = None
+        vehicle_error = None
+        
+        try:
+            # Extract input argument name if available
+            if len(road_sig) > 1 and len(road_sig[1]) > 0:
+                input_name = list(road_sig[1].keys())[0]
+                inputs_dict = {input_name: tf_input}
+                _road_model.signatures['serving_default'](**inputs_dict)
+            else:
+                _road_model.signatures['serving_default'](tf_input)
+            road_success = True
+        except Exception as e:
+            road_error = str(e)
+        
+        try:
+            # Extract input argument name if available
+            if len(vehicle_sig) > 1 and len(vehicle_sig[1]) > 0:
+                input_name = list(vehicle_sig[1].keys())[0]
+                inputs_dict = {input_name: tf_input}
+                _vehicle_model.signatures['serving_default'](**inputs_dict)
+            else:
+                _vehicle_model.signatures['serving_default'](tf_input)
+            vehicle_success = True
+        except Exception as e:
+            vehicle_error = str(e)
+        
+        return jsonify({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "models_loaded": {
+                "road_model": _road_model is not None,
+                "vehicle_model": _vehicle_model is not None
+            },
+            "model_signatures": {
+                "road_model": {
+                    "input_signature": str(road_sig),
+                    "output_signature": str(road_output_sig)
+                },
+                "vehicle_model": {
+                    "input_signature": str(vehicle_sig),
+                    "output_signature": str(vehicle_output_sig)
+                }
+            },
+            "test_prediction": {
+                "road_model": {
+                    "success": road_success,
+                    "error": road_error
+                },
+                "vehicle_model": {
+                    "success": vehicle_success,
+                    "error": vehicle_error
+                }
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
