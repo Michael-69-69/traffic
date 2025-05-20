@@ -922,3 +922,69 @@ def debug_model():
             "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
+
+
+@app.route('/camera-status')
+def check_camera_status():
+    """Check if all cameras are working and return their status"""
+    try:
+        # Initialize results
+        results = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "cameras": {}
+        }
+        
+        # Load dependencies if not already loaded
+        if not load_dependencies():
+            return jsonify({
+                "error": "Failed to load dependencies",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }), 500
+        
+        # Check each camera
+        for camera_id, camera_name in cameras:
+            # Get camera code
+            camera_code = camera_mapping.get(camera_name, camera_name)
+            
+            # Try to fetch image
+            try:
+                logger.info(f"Checking camera {camera_name}")
+                image = fetch_camera_image(camera_id)
+                
+                if image is None:
+                    # Camera fetch failed
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "status": "offline",
+                        "error": "Failed to fetch image"
+                    }
+                else:
+                    # Camera fetch succeeded
+                    # Check if image is valid (not just an error page)
+                    # This is a simple check - you might need a more sophisticated one
+                    if image.size > 1000:  # If image has reasonable size
+                        results["cameras"][camera_code] = {
+                            "name": camera_name,
+                            "status": "online",
+                            "resolution": f"{image.shape[1]}x{image.shape[0]}"
+                        }
+                    else:
+                        results["cameras"][camera_code] = {
+                            "name": camera_name,
+                            "status": "error",
+                            "error": "Retrieved image is too small or invalid"
+                        }
+            except Exception as e:
+                # Error processing this camera
+                results["cameras"][camera_code] = {
+                    "name": camera_name,
+                    "status": "error",
+                    "error": str(e)
+                }
+        
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
