@@ -311,48 +311,65 @@ def manage_historical_densities():
     return sample_critical_densities, today_densities
 
 def fetch_camera_image(camera_id):
-    """Fetch camera image by mimicking a browser session"""
+    """Fetch camera image by properly mimicking a browser session"""
     if not load_dependencies():
         return None
-         
+          
     try:
         # Reset session if it doesn't exist
         global _session
         if _session is None:
             _session = _requests.Session()
-         
-        # Use a common browser User-Agent
+          
+        # Use a more complete set of browser-like headers
         _session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Referer": "https://giaothong.hochiminhcity.gov.vn/"
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+            "Referer": "https://giaothong.hochiminhcity.gov.vn/Home/Camera",
+            "Origin": "https://giaothong.hochiminhcity.gov.vn",
+            "sec-ch-ua": '"Google Chrome";v="127", "Chromium";v="127", "Not-A.Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "Sec-Fetch-Dest": "image",
+            "Sec-Fetch-Mode": "no-cors",
+            "Sec-Fetch-Site": "same-site"
         })
-         
-        # First, visit the main website to get cookies/session
-        logger.info("Visiting main website to establish session")
-        main_response = _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
-        if main_response.status_code != 200:
-            logger.warning(f"Failed to access main website: {main_response.status_code}")
-         
-        # Build URL with camera ID
+          
+        # First, visit the camera page to establish a proper session
+        camera_page_url = "https://giaothong.hochiminhcity.gov.vn/Home/Camera"
+        logger.info(f"Visiting camera page to establish session: {camera_page_url}")
+        camera_page = _session.get(camera_page_url, timeout=15)
+        if camera_page.status_code != 200:
+            logger.warning(f"Failed to access camera page: {camera_page.status_code}")
+             
+        # Store any cookies we received
+        cookies = dict(_session.cookies)
+        logger.info(f"Session cookies: {cookies}")
+             
+        # Build URL with camera ID (without any cache busting parameters)
         url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
         logger.info(f"Fetching image from {url}")
          
+        # Add a small delay to mimic human browsing behavior
+        time.sleep(0.5)
+          
         # Now fetch the camera image with the established session
-        response = _session.get(url, timeout=10)
+        response = _session.get(url, timeout=15)
         response.raise_for_status()
+          
+        # Log successful response
+        logger.info(f"Successfully fetched image from {url} with status {response.status_code}")
          
         # Convert response to image
         image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
         image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-         
+          
         if image is None:
             logger.warning(f"Failed to decode image from {url}")
             return None
-         
+             
+        logger.info(f"Successfully decoded image from {url}, shape: {image.shape}")
         return image
     except _requests.exceptions.HTTPError as e:
         if e.response.status_code == 403:
