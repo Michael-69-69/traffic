@@ -311,37 +311,34 @@ def manage_historical_densities():
     return sample_critical_densities, today_densities
 
 def fetch_camera_image(camera_id):
-    """Fetch camera image by mimicking a browser session with cache busting"""
+    """Fetch camera image by mimicking a browser session"""
     if not load_dependencies():
         return None
-          
+         
     try:
         # Reset session if it doesn't exist
         global _session
         if _session is None:
             _session = _requests.Session()
-          
+         
         # Use a common browser User-Agent
         _session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
-            "Cache-Control": "no-cache, no-store, must-revalidate",  # Add cache control
-            "Pragma": "no-cache",  # Add pragmas
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Referer": "https://giaothong.hochiminhcity.gov.vn/"
         })
-          
-        # Build URL with camera ID and add cache-busting parameter
+         
+        # First, visit the main website to get cookies/session
+        logger.info("Visiting main website to establish session")
+        main_response = _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
+        if main_response.status_code != 200:
+            logger.warning(f"Failed to access main website: {main_response.status_code}")
+         
+        # Build URL with camera ID
         url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
-        # Add a timestamp parameter to prevent caching
-        cache_buster = int(time.time())
-        if "?" in url:
-            url = f"{url}&_t={cache_buster}"
-        else:
-            url = f"{url}?_t={cache_buster}"
-             
         logger.info(f"Fetching image from {url}")
          
         # Now fetch the camera image with the established session
@@ -374,15 +371,20 @@ def fetch_camera_image(camera_id):
         return None
 
 def analyze_image(image):
-    """Analyze the image with ML models and add time-based variation"""
+    """Analyze the image with ML models - adjusted to handle 12-channel output"""
     if not load_dependencies() or image is None:
-        return {"density": 0.0}
+        # Return zero if dependencies aren't loaded or image is None
+        return {
+            "density": 0.0
+        }
     
     try:
         # Skip model analysis if models aren't loaded
         if _road_model is None or _vehicle_model is None:
             logger.warning("Models not loaded, using fallback values")
-            return {"density": 0.0}
+            return {
+                "density": 0.0
+            }
         
         # Preprocess image with correct float32 data type
         processed_image = preprocess_image(image)
@@ -410,39 +412,26 @@ def analyze_image(image):
             logger.info(f"Vehicle output shape: {vehicle_output_np.shape}")
             
             # Calculate density based on all 12 channels - apply different weights
+            # First channel might be background, so we can exclude it or weight it differently
+            # Assuming channels 1-11 represent different vehicle types or densities
             if vehicle_output_np.shape[-1] == 12:
-                # Extract different density components with weights
-                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]
+                # Extract different density components - adjust these weights based on your model's output
+                # This is a sample weighting scheme - you should adjust based on what each channel represents
+                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]  # Example weights
                 
+                # Apply weights to each channel
                 weighted_sum = 0
-                for i in range(1, 12):
+                for i in range(1, 12):  # Skip channel 0 (background)
                     channel_mean = float(_np.mean(vehicle_output_np[..., i]))
                     weighted_sum += channel_mean * weights[i]
                 
                 # Scale to a reasonable density range (0-100)
                 density = weighted_sum * 100
                 
-                # Add time-of-day variation to ensure values change
-                current_hour = datetime.now().hour
-                
-                # Traffic patterns typically peak during rush hours (7-9 AM and 4-6 PM)
-                if current_hour >= 7 and current_hour <= 9:
-                    time_factor = 1.3  # Morning rush hour - increase density
-                elif current_hour >= 16 and current_hour <= 18:
-                    time_factor = 1.4  # Evening rush hour - increase density
-                elif current_hour >= 22 or current_hour <= 5:
-                    time_factor = 0.6  # Late night/early morning - decrease density
-                else:
-                    time_factor = 1.0  # Normal hours
-                    
-                # Apply the time factor to the density
-                original_density = density
-                density = density * time_factor
-                
                 # Ensure density is between 0 and 100
                 density = max(0, min(100, density))
                 
-                logger.info(f"Applied time factor {time_factor} to density. Original: {original_density}, New: {density}")
+                logger.info(f"Calculated weighted density: {density}")
             else:
                 # Fallback if the output shape is unexpected
                 density = float(_np.mean(vehicle_output_np) * 100)
@@ -476,9 +465,9 @@ def analyze_image(image):
         }
 
 def fetch_and_process_densities():
+    """Fetch and process density data with browser mimicking and fallback"""
     # Current timestamp
-    now = datetime.now()
-    timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
+    timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     # Initialize results
     results = {
@@ -486,10 +475,14 @@ def fetch_and_process_densities():
         "cameras": {}
     }
     
+    # Count success and failure
+    success_count = 0
+    failure_count = 0
+    
     # Process each camera
     for camera_id, camera_name in cameras:
         try:
-            logger.info(f"[{timestamp_str}] Processing camera {camera_name}")
+            logger.info(f"Processing camera {camera_name}")
             
             # Get camera code
             camera_code = camera_mapping.get(camera_name, camera_name)
@@ -499,22 +492,23 @@ def fetch_and_process_densities():
             
             if image is None:
                 # Image fetch failed, use simulated data
-                logger.warning(f"[{timestamp_str}] Using simulated data for {camera_name} due to image fetch failure")
+                failure_count += 1
+                logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
                 
-                # Generate random density with time-based variation
-                hour_of_day = now.hour
-                base_density = 70.0 if (hour_of_day >= 7 and hour_of_day <= 9) or (hour_of_day >= 16 and hour_of_day <= 18) else 40.0
-                density = round(base_density + random.uniform(-10.0, 10.0), 1)
-                
-                logger.info(f"[{timestamp_str}] Generated time-aware simulated density for {camera_name}: {density}")
+                # Generate random density
+                if _np is None:
+                    import random
+                    density = round(random.uniform(10.0, 90.0), 1)
+                else:
+                    density = round(_np.random.uniform(10.0, 90.0), 1)
             else:
                 # Image fetch succeeded, use real data
-                logger.info(f"[{timestamp_str}] Successfully fetched image for {camera_name}")
+                success_count += 1
+                logger.info(f"Successfully fetched image for {camera_name}")
                 
                 # Analyze the image
                 analysis_result = analyze_image(image)
                 density = analysis_result["density"]
-                logger.info(f"[{timestamp_str}] Analyzed image for {camera_name}: density={density}")
             
             # Add to results
             results["cameras"][camera_code] = {
@@ -522,10 +516,11 @@ def fetch_and_process_densities():
                 "density": density
             }
             
-            logger.info(f"[{timestamp_str}] Final processed camera {camera_name}: density={density}")
+            logger.info(f"Processed camera {camera_name}: density={density}")
             
         except Exception as e:
-            logger.error(f"[{timestamp_str}] Error processing camera {camera_name}: {e}")
+            logger.error(f"Error processing camera {camera_name}: {e}")
+            failure_count += 1
             
             # Add default values on error
             results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
@@ -533,13 +528,15 @@ def fetch_and_process_densities():
                 "density": 0.0
             }
     
-    # Save results to file
+    # Log success/failure statistics
+    logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
+    
+    # Save results
     try:
         with open(output_json_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-        logger.info(f"[{timestamp_str}] Saved results to {output_json_path}")
     except Exception as e:
-        logger.error(f"[{timestamp_str}] Error saving results: {e}")
+        logger.error(f"Error saving densities.json: {e}")
     
     return results
 
@@ -553,36 +550,17 @@ def density_worker():
         critical_densities, today_densities = manage_historical_densities()
         logger.info(f"Initial densities created: {len(critical_densities)} critical densities")
         
-        last_hour_processed = -1  # Track the last hour we've processed
-        
         while True:
             try:
-                current_hour = datetime.now().hour
-                
-                # Force processing if the hour has changed
-                if current_hour != last_hour_processed:
-                    logger.info(f"Hour changed from {last_hour_processed} to {current_hour}, forcing density update")
-                    fetch_and_process_densities()
-                    last_hour_processed = current_hour
-                    logger.info(f"Forced density update for hour {current_hour} completed")
-                else:
-                    # Regular processing cycle
-                    logger.info("Starting regular density processing cycle")
-                    fetch_and_process_densities()
-                    logger.info("Regular density processing cycle completed")
-                
-                # Sleep for 5 minutes between checks
-                logger.info(f"Sleeping for 5 minutes until next check (Current hour: {current_hour})")
-                time.sleep(300)
+                logger.info("Starting density processing cycle")
+                fetch_and_process_densities()
+                logger.info("Density processing cycle completed")
+                time.sleep(300)  # Increase to 5 minutes to avoid rate limiting
             except Exception as e:
                 logger.error(f"Error in density worker cycle: {e}")
-                logger.error(traceback.format_exc())  # Add full traceback for better debugging
-                logger.info("Sleeping for 30 seconds before retry due to error")
                 time.sleep(30)  # Shorter retry interval on error
     except Exception as e:
         logger.error(f"Critical error in density worker: {e}")
-        logger.error(traceback.format_exc())  # Add full traceback for critical errors too
-        raise  # Re-raise the exception to ensure the worker restarts if running in a managed environment
 
 # Start the density worker thread
 def start_worker():
