@@ -4,7 +4,7 @@ import time
 import logging
 import threading
 from datetime import datetime, timedelta
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 # Initialize Flask
 app = Flask(__name__)
@@ -271,44 +271,17 @@ def manage_historical_densities():
     else:
         today_densities = {'date': today.strftime('%Y-%m-%d')}
     
-    # Sample critical densities (static values to avoid model predictions initially)
-    sample_critical_densities = {
-        'A': 80.0, 'B': 70.0, 'C': 75.0, 'D': 85.0, 'E': 80.0, 'F': 60.0,
-        'G': 70.0, 'H': 90.0, 'I': 85.0, 'J': 75.0, 'K': 80.0, 'L': 80.0
-    }
-    
-    with open(critical_densities_path, 'w', encoding='utf-8') as f:
-        json.dump(sample_critical_densities, f, ensure_ascii=False)
-    
-    # Generate sample results (avoid running models on startup)
+    # Initialize empty results
     results = {
         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "cameras": {}
     }
     
-    # Populate with sample data
-    for _, camera_name in cameras:
-        camera_code = camera_mapping.get(camera_name, camera_name)
-        critical_density = sample_critical_densities.get(camera_code, 80.0)
-        
-        # Add simulated density data
-        results["cameras"][camera_code] = {
-            "name": camera_name,
-            "density": 50.0,  # Sample value
-            "congestion_level": 62.5,  # 50/80 * 100
-            "critical_density": critical_density,
-            "composition": {
-                "cars": 60.0,
-                "motorcycles": 35.0,
-                "others": 5.0
-            }
-        }
-    
     # Save the initial results
     with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     
-    return sample_critical_densities, today_densities
+    return {}, today_densities
 
 def fetch_camera_image(camera_id):
     """Fetch camera image by mimicking a browser session"""
@@ -987,4 +960,294 @@ def check_camera_status():
         return jsonify({
             "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
+
+
+@app.route('/today-densities')
+def get_today_densities():
+    """Return today's density data with timestamps"""
+    try:
+        if not os.path.exists(today_densities_path):
+            # Create empty structure with date
+            today_data = {'date': datetime.now().strftime('%Y-%m-%d')}
+            with open(today_densities_path, 'w', encoding='utf-8') as f:
+                json.dump(today_data, f, ensure_ascii=False)
+            return jsonify(today_data)
+            
+        with open(today_densities_path, 'r', encoding='utf-8') as f:
+            today_data = json.load(f)
+            return jsonify(today_data)
+    except Exception as e:
+        logger.error(f"Error reading today_densities.json: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/yesterday-max-densities')
+def get_yesterday_max_densities():
+    """Return yesterday's maximum density data"""
+    try:
+        if not os.path.exists(yesterday_max_densities_path):
+            # Create empty structure with yesterday's date
+            yesterday_data = {'date': (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')}
+            with open(yesterday_max_densities_path, 'w', encoding='utf-8') as f:
+                json.dump(yesterday_data, f, ensure_ascii=False)
+            return jsonify(yesterday_data)
+            
+        with open(yesterday_max_densities_path, 'r', encoding='utf-8') as f:
+            yesterday_data = json.load(f)
+            return jsonify(yesterday_data)
+    except Exception as e:
+        logger.error(f"Error reading yesterday_max_densities.json: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/critical-densities')
+def get_critical_densities():
+    """Return critical density thresholds"""
+    try:
+        if not os.path.exists(critical_densities_path):
+            # Sample critical densities
+            sample_critical_densities = {
+                'A': 80.0, 'B': 70.0, 'C': 75.0, 'D': 85.0, 'E': 80.0, 'F': 60.0,
+                'G': 70.0, 'H': 90.0, 'I': 85.0, 'J': 75.0, 'K': 80.0, 'L': 80.0
+            }
+            with open(critical_densities_path, 'w', encoding='utf-8') as f:
+                json.dump(sample_critical_densities, f, ensure_ascii=False)
+            return jsonify(sample_critical_densities)
+            
+        with open(critical_densities_path, 'r', encoding='utf-8') as f:
+            critical_data = json.load(f)
+            return jsonify(critical_data)
+    except Exception as e:
+        logger.error(f"Error reading critical_densities.json: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/all-density-files')
+def get_all_density_files():
+    """Return all density files in one request"""
+    try:
+        result = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Get today's densities
+        if os.path.exists(today_densities_path):
+            with open(today_densities_path, 'r', encoding='utf-8') as f:
+                result["today_densities"] = json.load(f)
+        else:
+            result["today_densities"] = {'date': datetime.now().strftime('%Y-%m-%d')}
+            
+        # Get yesterday's max densities
+        if os.path.exists(yesterday_max_densities_path):
+            with open(yesterday_max_densities_path, 'r', encoding='utf-8') as f:
+                result["yesterday_max_densities"] = json.load(f)
+        else:
+            result["yesterday_max_densities"] = {'date': (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')}
+            
+        # Get critical densities
+        if os.path.exists(critical_densities_path):
+            with open(critical_densities_path, 'r', encoding='utf-8') as f:
+                result["critical_densities"] = json.load(f)
+        else:
+            # Sample critical densities
+            result["critical_densities"] = {
+                'A': 80.0, 'B': 70.0, 'C': 75.0, 'D': 85.0, 'E': 80.0, 'F': 60.0,
+                'G': 70.0, 'H': 90.0, 'I': 85.0, 'J': 75.0, 'K': 80.0, 'L': 80.0
+            }
+            
+        # Get current densities
+        if os.path.exists(output_json_path):
+            with open(output_json_path, 'r', encoding='utf-8') as f:
+                result["current_densities"] = json.load(f)
+        else:
+            result["current_densities"] = {}
+            
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error reading density files: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+def update_today_densities(camera_code, camera_name, vehicle_density):
+    """Update today's densities JSON with timestamp"""
+    try:
+        # Load today's densities
+        today_densities = {}
+        if os.path.exists(today_densities_path):
+            with open(today_densities_path, 'r', encoding='utf-8') as f:
+                today_densities = json.load(f)
+        
+        # Initialize with date if not present
+        if 'date' not in today_densities:
+            today_densities['date'] = datetime.now().strftime('%Y-%m-%d')
+        
+        # Initialize camera entry if not present
+        if camera_code not in today_densities:
+            today_densities[camera_code] = {}
+        
+        # Add entry with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today_densities[camera_code][timestamp] = vehicle_density
+        
+        # Save updated densities
+        with open(today_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(today_densities, f, ensure_ascii=False)
+            
+        logger.info(f"Updated today's densities for {camera_name} at {timestamp}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating today's densities for {camera_name}: {e}")
+        return False
+
+def update_yesterday_max_densities():
+    """Check if day has changed and update yesterday's max densities"""
+    try:
+        # Get today's date
+        today = datetime.now().date()
+        
+        # Check if today_densities exists and has date
+        if not os.path.exists(today_densities_path):
+            return False
+            
+        with open(today_densities_path, 'r', encoding='utf-8') as f:
+            today_densities = json.load(f)
+            
+        # Check if date is present and is not today
+        if 'date' not in today_densities:
+            today_densities['date'] = today.strftime('%Y-%m-%d')
+            with open(today_densities_path, 'w', encoding='utf-8') as f:
+                json.dump(today_densities, f, ensure_ascii=False)
+            return False
+            
+        file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
+        if file_date == today:
+            # Date is current, no update needed
+            return False
+            
+        # Date has changed, calculate max densities for each camera
+        max_densities = {'date': (today - timedelta(days=1)).strftime('%Y-%m-%d')}
+        for cam_id in today_densities:
+            if cam_id != 'date':
+                timestamps = today_densities[cam_id]
+                if timestamps:  # Only calculate if there's data
+                    max_density = max(timestamps.values())
+                    max_densities[cam_id] = max_density
+        
+        # Save yesterday's max densities
+        with open(yesterday_max_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(max_densities, f, ensure_ascii=False)
+            
+        # Reset today's densities for the new day
+        today_densities = {'date': today.strftime('%Y-%m-%d')}
+        with open(today_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(today_densities, f, ensure_ascii=False)
+            
+        logger.info(f"Updated yesterday's max densities for {file_date}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating yesterday's max densities: {e}")
+        return False
+
+@app.route('/update-critical-densities', methods=['POST'])
+def update_critical_densities():
+    """Update critical density thresholds"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        # Validate the data structure - ensure it has camera codes as keys
+        for key in data:
+            if key not in camera_mapping.values():
+                return jsonify({"error": f"Invalid camera code: {key}"}), 400
+                
+        with open(critical_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+            
+        return jsonify({
+            "status": "success",
+            "message": "Critical densities updated successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error updating critical_densities.json: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/update-all-json-files', methods=['POST'])
+def update_all_json_files():
+    """Update all JSON files with current real data"""
+    try:
+        # Get current timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today_date = datetime.now().strftime('%Y-%m-%d')
+        yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # Process current densities from cameras
+        current_densities = {}
+        today_data = {'date': today_date}
+        
+        # Force camera refresh for latest data
+        for camera_id, camera_name in cameras:
+            camera_code = camera_mapping.get(camera_name)
+            if not camera_code:
+                continue
+                
+            # Get latest density data for this camera
+            image = fetch_camera_image(camera_id)
+            if image is not None:
+                analysis = analyze_image(image)
+                density = analysis.get('density', 0.0)
+                
+                # Update current densities
+                current_densities[camera_code] = density
+                
+                # Update today's densities with timestamp
+                if camera_code not in today_data:
+                    today_data[camera_code] = {}
+                today_data[camera_code][timestamp] = density
+        
+        # Write current densities
+        with open(output_json_path, 'w', encoding='utf-8') as f:
+            json.dump(current_densities, f, ensure_ascii=False)
+            
+        # Write today's densities with timestamp data
+        with open(today_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(today_data, f, ensure_ascii=False)
+            
+        # Calculate and write yesterday's max densities if it doesn't exist
+        if not os.path.exists(yesterday_max_densities_path):
+            yesterday_data = {'date': yesterday_date}
+            with open(yesterday_max_densities_path, 'w', encoding='utf-8') as f:
+                json.dump(yesterday_data, f, ensure_ascii=False)
+        
+        # Calculate and write critical densities if it doesn't exist
+        # Only use real data from yesterday if available
+        if not os.path.exists(critical_densities_path):
+            # Check if we have yesterday's data to use
+            if os.path.exists(yesterday_max_densities_path):
+                with open(yesterday_max_densities_path, 'r', encoding='utf-8') as f:
+                    yesterday_data = json.load(f)
+                    critical_data = {k: v for k, v in yesterday_data.items() if k != 'date'}
+                    # Only write if we have actual camera data
+                    if critical_data:
+                        with open(critical_densities_path, 'w', encoding='utf-8') as f:
+                            json.dump(critical_data, f, ensure_ascii=False)
+        
+        return jsonify({
+            "status": "success",
+            "timestamp": timestamp,
+            "message": "All JSON files updated with current real data",
+            "cameras_processed": len(current_densities)
+        })
+    except Exception as e:
+        logger.error(f"Error updating JSON files: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to update JSON files: {str(e)}"
         }), 500
