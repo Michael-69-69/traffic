@@ -5,6 +5,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
+from urllib.parse import urlparse, parse_qs, unquote
 
 # Initialize Flask
 app = Flask(__name__)
@@ -26,44 +27,58 @@ default_params = {
 base_directory = os.environ.get('BASE_DIR', '/app')
 densities_dir = os.path.join(base_directory, "densities")
 today_densities_path = os.path.join(densities_dir, "today_densities.json")
-yesterday_max_densities_path = os.path.join(densities_dir, "yesterday_max_densities.json")
+yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
 critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
 output_json_path = os.path.join(densities_dir, "densities.json")
 
 # Create directories if they don't exist
 os.makedirs(densities_dir, exist_ok=True)
 
-# Camera mapping
-camera_mapping = {
-    'Lý Thái Tổ - Sư Vạn Hạnh': 'A',
-    'Ba Tháng Hai - Cao Thắng': 'B',
-    'Điện Biên Phủ – Cao Thắng': 'C',
-    'Nút giao Ngã sáu Nguyễn Tri Phương_1': 'D',
-    'Nút giao Ngã sáu Nguyễn Tri Phương': 'E',
-    'Nút giao Lê Đại Hành 2 (Lê Đại Hành)': 'F',
-    'Lý Thái Tổ - Nguyễn Đình Chiểu': 'G',
-    'Nút giao Ngã sáu Cộng Hòa_1': 'H',
-    'Nút giao Ngã sáu Cộng Hòa': 'I',
-    'Điện Biên Phủ - Cách Mạng Tháng Tám': 'J',
-    'Nút giao Công Trường Dân Chủ': 'K',
-    'Nút giao Công Trường Dân Chủ_1': 'L'
-}
-
-# List of cameras with their IDs and locations
-cameras = [
-    ("6623e7076f998a001b2523ea", "Lý Thái Tổ - Sư Vạn Hạnh"),
-    ("5deb576d1dc17d7c5515acf8", "Ba Tháng Hai - Cao Thắng"),
-    ("63ae7a9cbfd3d90017e8f303", "Điện Biên Phủ – Cao Thắng"),
-    ("5deb576d1dc17d7c5515ad21", "Nút giao Ngã sáu Nguyễn Tri Phương"),
-    ("5deb576d1dc17d7c5515ad22", "Nút giao Ngã sáu Nguyễn Tri Phương_1"),
-    ("5d8cdd26766c880017188974", "Nút giao Lê Đại Hành 2 (Lê Đại Hành)"),
-    ("63ae763bbfd3d90017e8f0c4", "Lý Thái Tổ - Nguyễn Đình Chiểu"),
-    ("5deb576d1dc17d7c5515acf6", "Nút giao Ngã sáu Cộng Hòa"),
-    ("5deb576d1dc17d7c5515acf7", "Nút giao Ngã sáu Cộng Hòa_1"),
-    ("5deb576d1dc17d7c5515acf2", "Điện Biên Phủ - Cách Mạng Tháng Tám"),
-    ("5deb576d1dc17d7c5515acf9", "Nút giao Công Trường Dân Chủ"),
-    ("5deb576d1dc17d7c5515acfa", "Nút giao Công Trường Dân Chủ_1")
+# Camera websites list - updated with your provided URLs
+camera_websites = [
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
 ]
+
+# Parse camera data from URLs
+def parse_camera_data():
+    """Parse camera IDs and locations from the camera websites"""
+    cameras = []
+    camera_mapping = {}
+    
+    for idx, url in enumerate(camera_websites):
+        try:
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+            
+            camera_id = query_params.get('camId', [''])[0]
+            camera_location = unquote(query_params.get('camLocation', [''])[0])
+            
+            if camera_id and camera_location:
+                # Generate camera code (A, B, C, etc.)
+                camera_code = chr(65 + idx)  # A=65, B=66, etc.
+                
+                cameras.append((camera_id, camera_location))
+                camera_mapping[camera_location] = camera_code
+                
+                logger.info(f"Parsed camera {camera_code}: {camera_location} (ID: {camera_id})")
+        except Exception as e:
+            logger.error(f"Error parsing camera URL {url}: {e}")
+    
+    return cameras, camera_mapping
+
+# Generate cameras and mapping from the URLs
+cameras, camera_mapping = parse_camera_data()
 
 # Camera URL template - Update with your actual base URL
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
@@ -79,6 +94,9 @@ _session = None
 
 # Flag to control whether models are loaded or we use mock data
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
+
+# Global variable to store last density update time
+last_density_update = None
 
 def load_dependencies():
     """Lazily load dependencies only when needed"""
@@ -237,78 +255,119 @@ def preprocess_image(img):
         logger.error(f"Error preprocessing image: {e}")
         return None
 
-def manage_historical_densities():
-    """Manage historical density data"""
+def check_new_day():
+    """Check if it's a new day and transfer today's densities to yesterday"""
     today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
     
-    # Initialize today's densities
+    # Load today's densities
     today_densities = {}
     if os.path.exists(today_densities_path):
         try:
             with open(today_densities_path, 'r', encoding='utf-8') as f:
                 today_densities = json.load(f)
-            # Check if today_densities is from today
-            if 'date' in today_densities:
-                file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
-                if file_date != today:
-                    # Move today's densities to yesterday if it's from a previous day
-                    max_densities = {}
-                    for cam_id in today_densities:
-                        if cam_id != 'date':
-                            timestamps = today_densities[cam_id]
-                            max_density = max(timestamps.values()) if timestamps else 0.0
-                            max_densities[cam_id] = max_density
-                    with open(yesterday_max_densities_path, 'w', encoding='utf-8') as f:
-                        json.dump({'date': yesterday.strftime('%Y-%m-%d'), **max_densities}, f, ensure_ascii=False)
-                    today_densities = {'date': today.strftime('%Y-%m-%d')}
-                    logger.info(f"Updated yesterday_max_densities.json with max densities from {file_date}")
-            else:
-                today_densities = {'date': today.strftime('%Y-%m-%d')}
         except Exception as e:
             logger.error(f"Error reading today_densities.json: {e}")
-            today_densities = {'date': today.strftime('%Y-%m-%d')}
-    else:
-        today_densities = {'date': today.strftime('%Y-%m-%d')}
+            today_densities = {}
     
-    # Sample critical densities (static values to avoid model predictions initially)
-    sample_critical_densities = {
-        'A': 80.0, 'B': 70.0, 'C': 75.0, 'D': 85.0, 'E': 80.0, 'F': 60.0,
-        'G': 70.0, 'H': 90.0, 'I': 85.0, 'J': 75.0, 'K': 80.0, 'L': 80.0
-    }
-    
-    with open(critical_densities_path, 'w', encoding='utf-8') as f:
-        json.dump(sample_critical_densities, f, ensure_ascii=False)
-    
-    # Generate sample results (avoid running models on startup)
-    results = {
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "cameras": {}
-    }
-    
-    # Populate with sample data
-    for _, camera_name in cameras:
-        camera_code = camera_mapping.get(camera_name, camera_name)
-        critical_density = sample_critical_densities.get(camera_code, 80.0)
+    # Check if the date has changed
+    if 'date' in today_densities:
+        try:
+            file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
+            if file_date < today:
+                # It's a new day, transfer today's data to yesterday
+                logger.info(f"New day detected. Transferring data from {file_date} to yesterday")
+                
+                # Save current today's densities as yesterday's
+                with open(yesterday_densities_path, 'w', encoding='utf-8') as f:
+                    json.dump(today_densities, f, ensure_ascii=False, indent=2)
+                
+                # Update critical densities with max values from yesterday
+                update_critical_densities(today_densities)
+                
+                # Reset today's densities
+                today_densities = {
+                    'date': today.strftime('%Y-%m-%d'),
+                    'densities_by_time': {}
+                }
+                
+                with open(today_densities_path, 'w', encoding='utf-8') as f:
+                    json.dump(today_densities, f, ensure_ascii=False, indent=2)
+                
+                logger.info("Successfully transferred data to yesterday and reset today's data")
+        except Exception as e:
+            logger.error(f"Error processing date change: {e}")
+
+def update_critical_densities(densities_data):
+    """Update critical densities with the highest values from the day"""
+    try:
+        # Load existing critical densities
+        critical_densities = {}
+        if os.path.exists(critical_densities_path):
+            with open(critical_densities_path, 'r', encoding='utf-8') as f:
+                critical_densities = json.load(f)
         
-        # Add simulated density data
-        results["cameras"][camera_code] = {
-            "name": camera_name,
-            "density": 50.0,  # Sample value
-            "congestion_level": 62.5,  # 50/80 * 100
-            "critical_density": critical_density,
-            "composition": {
-                "cars": 60.0,
-                "motorcycles": 35.0,
-                "others": 5.0
-            }
+        # Find maximum densities from the day's data
+        densities_by_time = densities_data.get('densities_by_time', {})
+        
+        for camera_code in camera_mapping.values():
+            max_density = 0.0
+            
+            # Go through all timestamps for this camera
+            for timestamp, cameras_data in densities_by_time.items():
+                if camera_code in cameras_data:
+                    density = cameras_data[camera_code].get('density', 0.0)
+                    max_density = max(max_density, density)
+            
+            # Update critical density if this is higher
+            if camera_code not in critical_densities or max_density > critical_densities[camera_code]:
+                critical_densities[camera_code] = max_density
+                logger.info(f"Updated critical density for {camera_code}: {max_density}")
+        
+        # Save critical densities
+        with open(critical_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(critical_densities, f, ensure_ascii=False, indent=2)
+        
+        logger.info("Critical densities updated successfully")
+        
+    except Exception as e:
+        logger.error(f"Error updating critical densities: {e}")
+
+def manage_historical_densities():
+    """Manage historical density data"""
+    today = datetime.now().date()
+    
+    # Check for new day
+    check_new_day()
+    
+    # Initialize today's densities if not exists
+    today_densities = {}
+    if os.path.exists(today_densities_path):
+        try:
+            with open(today_densities_path, 'r', encoding='utf-8') as f:
+                today_densities = json.load(f)
+        except Exception as e:
+            logger.error(f"Error reading today_densities.json: {e}")
+            today_densities = {}
+    
+    if 'date' not in today_densities or today_densities['date'] != today.strftime('%Y-%m-%d'):
+        today_densities = {
+            'date': today.strftime('%Y-%m-%d'),
+            'densities_by_time': {}
         }
+        
+        with open(today_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(today_densities, f, ensure_ascii=False, indent=2)
     
-    # Save the initial results
-    with open(output_json_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    # Initialize critical densities if not exists
+    if not os.path.exists(critical_densities_path):
+        sample_critical_densities = {}
+        for camera_code in camera_mapping.values():
+            sample_critical_densities[camera_code] = 80.0  # Default critical density
+        
+        with open(critical_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(sample_critical_densities, f, ensure_ascii=False, indent=2)
     
-    return sample_critical_densities, today_densities
+    return today_densities
 
 def fetch_camera_image(camera_id):
     """Fetch camera image by mimicking a browser session"""
@@ -464,10 +523,39 @@ def analyze_image(image):
             "density": 0.0
         }
 
+def store_today_density(timestamp_str, camera_code, density_data):
+    """Store density data for today"""
+    try:
+        # Load today's densities
+        today_densities = {}
+        if os.path.exists(today_densities_path):
+            with open(today_densities_path, 'r', encoding='utf-8') as f:
+                today_densities = json.load(f)
+        
+        # Initialize structure if not exists
+        if 'densities_by_time' not in today_densities:
+            today_densities['densities_by_time'] = {}
+        
+        if timestamp_str not in today_densities['densities_by_time']:
+            today_densities['densities_by_time'][timestamp_str] = {}
+        
+        # Store the density data
+        today_densities['densities_by_time'][timestamp_str][camera_code] = density_data
+        
+        # Save back to file
+        with open(today_densities_path, 'w', encoding='utf-8') as f:
+            json.dump(today_densities, f, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error storing today's density: {e}")
+
 def fetch_and_process_densities():
     """Fetch and process density data with browser mimicking and fallback"""
+    global last_density_update
+    
     # Current timestamp
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    last_density_update = datetime.now()
     
     # Initialize results
     results = {
@@ -510,11 +598,18 @@ def fetch_and_process_densities():
                 analysis_result = analyze_image(image)
                 density = analysis_result["density"]
             
-            # Add to results
-            results["cameras"][camera_code] = {
+            # Prepare density data
+            density_data = {
                 "name": camera_name,
-                "density": density
+                "density": density,
+                "timestamp": timestamp_str
             }
+            
+            # Add to results
+            results["cameras"][camera_code] = density_data
+            
+            # Store in today's densities
+            store_today_density(timestamp_str, camera_code, density_data)
             
             logger.info(f"Processed camera {camera_name}: density={density}")
             
@@ -523,10 +618,13 @@ def fetch_and_process_densities():
             failure_count += 1
             
             # Add default values on error
-            results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
+            density_data = {
                 "name": camera_name,
-                "density": 0.0
+                "density": 0.0,
+                "timestamp": timestamp_str
             }
+            results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
+            store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
     
     # Log success/failure statistics
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
@@ -541,24 +639,25 @@ def fetch_and_process_densities():
     return results
 
 def density_worker():
-    """Background worker to process densities periodically"""
-    logger.info("Density worker initialized")
+    """Background worker to process densities every 30 seconds"""
+    logger.info("Density worker initialized - running every 30 seconds")
     
     try:
         # Initial run without delay
         logger.info("Starting initial density calculation")
-        critical_densities, today_densities = manage_historical_densities()
-        logger.info(f"Initial densities created: {len(critical_densities)} critical densities")
+        manage_historical_densities()
+        fetch_and_process_densities()
+        logger.info("Initial density calculation completed")
         
         while True:
             try:
-                logger.info("Starting density processing cycle")
+                logger.info("Starting density processing cycle (30-second interval)")
                 fetch_and_process_densities()
                 logger.info("Density processing cycle completed")
-                time.sleep(300)  # Increase to 5 minutes to avoid rate limiting
+                time.sleep(30)  # Update every 30 seconds as requested
             except Exception as e:
                 logger.error(f"Error in density worker cycle: {e}")
-                time.sleep(30)  # Shorter retry interval on error
+                time.sleep(10)  # Shorter retry interval on error
     except Exception as e:
         logger.error(f"Critical error in density worker: {e}")
 
@@ -580,9 +679,9 @@ def start_worker():
             # Try to diagnose the issue
             if not load_dependencies():
                 logger.error("Problem: Dependencies failed to load")
-            elif not os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")):
+            elif not os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf")):
                 logger.error("Problem: Road model file not found")
-            elif not os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")):
+            elif not os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf")):
                 logger.error("Problem: Vehicle model file not found")
             else:
                 logger.error("Problem: Unclear - check model format or TensorFlow compatibility")
@@ -605,11 +704,137 @@ def index():
         "status": "running",
         "version": "1.0",
         "message": "Traffic Analysis Service is operational",
-        "using_models": USE_MODELS
+        "using_models": USE_MODELS,
+        "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
     })
+
+@app.route('/cameras')
+def get_cameras():
+    """Route 1: Fetch all camera information"""
+    try:
+        cameras_info = []
+        
+        for idx, (camera_id, camera_location) in enumerate(cameras):
+            camera_code = chr(65 + idx)  # A, B, C, etc.
+            
+            cameras_info.append({
+                "code": camera_code,
+                "id": camera_id,
+                "name": camera_location,
+                "url": camera_websites[idx] if idx < len(camera_websites) else None
+            })
+        
+        return jsonify({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "total_cameras": len(cameras_info),
+            "cameras": cameras_info
+        })
+    except Exception as e:
+        logger.error(f"Error fetching cameras: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/live-densities')
+def get_live_densities():
+    """Route 2: Fetch current live densities (recalculated every 30 seconds)"""
+    try:
+        # Check if file exists
+        if not os.path.exists(output_json_path):
+            return jsonify({
+                "error": "No density data available yet",
+                "message": "Please wait for the first calculation cycle"
+            }), 404
+        
+        # Read the current densities
+        with open(output_json_path, 'r', encoding='utf-8') as f:
+            densities = json.load(f)
+        
+        # Add update information
+        densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        densities["update_interval"] = "30 seconds"
+        densities["next_update_in"] = None
+        
+        if last_density_update:
+            next_update = last_density_update + timedelta(seconds=30)
+            time_until_next = next_update - datetime.now()
+            if time_until_next.total_seconds() > 0:
+                densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds"
+            else:
+                densities["next_update_in"] = "Updating now..."
+        
+        return jsonify(densities)
+    except Exception as e:
+        logger.error(f"Error reading live densities: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/today-densities')
+def get_today_densities():
+    """Route 3: Get today's stored densities for all nodes"""
+    try:
+        if not os.path.exists(today_densities_path):
+            manage_historical_densities()
+        
+        with open(today_densities_path, 'r', encoding='utf-8') as f:
+            today_densities = json.load(f)
+        
+        return jsonify(today_densities)
+    except Exception as e:
+        logger.error(f"Error reading today's densities: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/yesterday-densities')
+def get_yesterday_densities():
+    """Route 4: Get yesterday's stored densities for all nodes"""
+    try:
+        if not os.path.exists(yesterday_densities_path):
+            return jsonify({
+                "message": "No yesterday data available yet",
+                "date": None,
+                "densities_by_time": {}
+            })
+        
+        with open(yesterday_densities_path, 'r', encoding='utf-8') as f:
+            yesterday_densities = json.load(f)
+        
+        return jsonify(yesterday_densities)
+    except Exception as e:
+        logger.error(f"Error reading yesterday's densities: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+@app.route('/critical-densities')
+def get_critical_densities():
+    """Route 5: Get critical densities (most crowded from today and yesterday)"""
+    try:
+        if not os.path.exists(critical_densities_path):
+            manage_historical_densities()
+        
+        with open(critical_densities_path, 'r', encoding='utf-8') as f:
+            critical_densities = json.load(f)
+        
+        # Add metadata
+        result = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "description": "Critical density thresholds based on historical maximum values",
+            "critical_densities": critical_densities
+        }
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error reading critical densities: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 @app.route('/densities')
 def get_densities():
+    """Legacy route for backward compatibility"""
     try:
         # Check if file exists
         if not os.path.exists(output_json_path):
@@ -639,6 +864,8 @@ def status():
         "memory_optimized": True,
         "version": "1.0",
         "using_models": USE_MODELS,
+        "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
+        "total_cameras": len(cameras),
         "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
 
@@ -648,16 +875,23 @@ def health_check():
         # Check if directories exist
         densities_exists = os.path.exists(densities_dir)
         output_exists = os.path.exists(output_json_path)
+        today_exists = os.path.exists(today_densities_path)
+        yesterday_exists = os.path.exists(yesterday_densities_path)
+        critical_exists = os.path.exists(critical_densities_path)
         
         return jsonify({
             "status": "healthy",
             "filesystem": {
                 "densities_dir_exists": densities_exists,
                 "output_file_exists": output_exists,
+                "today_densities_exists": today_exists,
+                "yesterday_densities_exists": yesterday_exists,
+                "critical_densities_exists": critical_exists,
                 "densities_dir": densities_dir,
                 "output_path": output_json_path
             },
             "using_models": USE_MODELS,
+            "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
@@ -682,42 +916,19 @@ def refresh_densities():
             "message": f"Failed to refresh densities: {str(e)}"
         }), 500
 
-# Start the worker when the app starts
-if __name__ != "__main__":
-    # Only start worker when running with Gunicorn, not during flask development server
-    start_worker()
-
-if __name__ == "__main__":
-    # Initialize data files
-    manage_historical_densities()
-    
-    # Start the density worker thread
-    start_worker()
-    
-    # Get the port from environment variable or use default
-    port = int(os.environ.get("PORT", 10000))
-    
-    # Run the Flask app
-    app.run(host='0.0.0.0', port=port, debug=True)
-
-
 @app.route('/debug')
 def debug():
     """Debug endpoint to check environment variables and model files"""
     try:
         # Check for model files
         model_info = {
-            "unet_road_segmentation.keras": {
-                "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")),
-                "size_mb": round(os.path.getsize(os.path.join(base_directory, "unet_road_segmentation.keras")) / (1024 * 1024), 2) if os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")) else None,
-                "last_modified": datetime.fromtimestamp(os.path.getmtime(os.path.join(base_directory, "unet_road_segmentation.keras"))).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras")) else None,
-                "tf_converted_exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras_tf"))
+            "unet_road_segmentation_tf": {
+                "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf")),
+                "saved_model_exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf", "saved_model.pb"))
             },
-            "unet_multi_classV1.keras": {
-                "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")),
-                "size_mb": round(os.path.getsize(os.path.join(base_directory, "unet_multi_classV1.keras")) / (1024 * 1024), 2) if os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")) else None,
-                "last_modified": datetime.fromtimestamp(os.path.getmtime(os.path.join(base_directory, "unet_multi_classV1.keras"))).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras")) else None,
-                "tf_converted_exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras_tf"))
+            "unet_multi_classV1_tf": {
+                "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf")),
+                "saved_model_exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf", "saved_model.pb"))
             }
         }
         
@@ -736,7 +947,7 @@ def debug():
         densities_info = {
             "densities_dir_exists": os.path.exists(densities_dir),
             "today_densities_exists": os.path.exists(today_densities_path),
-            "yesterday_max_densities_exists": os.path.exists(yesterday_max_densities_path),
+            "yesterday_densities_exists": os.path.exists(yesterday_densities_path),
             "critical_densities_exists": os.path.exists(critical_densities_path),
             "output_json_exists": os.path.exists(output_json_path)
         }
@@ -755,8 +966,8 @@ def debug():
         }
         
         # Get system resources
-        import psutil
         try:
+            import psutil
             memory_info = {
                 "total_memory_mb": round(psutil.virtual_memory().total / (1024 * 1024), 2),
                 "available_memory_mb": round(psutil.virtual_memory().available / (1024 * 1024), 2),
@@ -775,7 +986,9 @@ def debug():
             "base_directory": base_directory,
             "files_in_base_directory": files_in_base_dir,
             "densities_info": densities_info,
-            "system_resources": memory_info
+            "system_resources": memory_info,
+            "cameras_parsed": len(cameras),
+            "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         })
     except Exception as e:
         logger.error(f"Error in debug endpoint: {e}")
@@ -784,7 +997,6 @@ def debug():
             "details": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
-
 
 @app.route('/load-models')
 def force_load_models():
@@ -805,10 +1017,10 @@ def force_load_models():
             },
             "model_files": {
                 "road_model": {
-                    "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation.keras"))
+                    "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf"))
                 },
                 "vehicle_model": {
-                    "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1.keras"))
+                    "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf"))
                 }
             },
             "environment": {
@@ -830,7 +1042,6 @@ def force_load_models():
             "traceback": error_details,
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
-
 
 @app.route('/debug-model')
 def debug_model():
@@ -923,7 +1134,6 @@ def debug_model():
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
 
-
 @app.route('/camera-status')
 def check_camera_status():
     """Check if all cameras are working and return their status"""
@@ -988,3 +1198,21 @@ def check_camera_status():
             "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
+
+# Start the worker when the app starts
+if __name__ != "__main__":
+    # Only start worker when running with Gunicorn, not during flask development server
+    start_worker()
+
+if __name__ == "__main__":
+    # Initialize data files
+    manage_historical_densities()
+    
+    # Start the density worker thread
+    start_worker()
+    
+    # Get the port from environment variable or use default
+    port = int(os.environ.get("PORT", 10000))
+    
+    # Run the Flask app
+    app.run(host='0.0.0.0', port=port, debug=True)%
