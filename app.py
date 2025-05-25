@@ -24,15 +24,37 @@ default_params = {
 }
 
 # Paths for models and output
-base_directory = os.environ.get('BASE_DIR', '/app')
+base_directory = os.environ.get('BASE_DIR', os.getcwd())
 densities_dir = os.path.join(base_directory, "densities")
 today_densities_path = os.path.join(densities_dir, "today_densities.json")
 yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
 critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
 output_json_path = os.path.join(densities_dir, "densities.json")
 
-# Create directories if they don't exist
-os.makedirs(densities_dir, exist_ok=True)
+# Create directories if they don't exist (with error handling for permissions)
+try:
+    os.makedirs(densities_dir, exist_ok=True)
+    logger.info(f"Created densities directory: {densities_dir}")
+except PermissionError:
+    # Fallback to current directory if we can't create in base_directory
+    logger.warning(f"Permission denied for {densities_dir}, using current directory")
+    densities_dir = os.path.join(os.getcwd(), "densities")
+    today_densities_path = os.path.join(densities_dir, "today_densities.json")
+    yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
+    critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
+    output_json_path = os.path.join(densities_dir, "densities.json")
+    os.makedirs(densities_dir, exist_ok=True)
+    logger.info(f"Using fallback densities directory: {densities_dir}")
+except Exception as e:
+    logger.error(f"Error creating densities directory: {e}")
+    # Use temp directory as last resort
+    import tempfile
+    densities_dir = tempfile.mkdtemp(prefix="densities_")
+    today_densities_path = os.path.join(densities_dir, "today_densities.json")
+    yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
+    critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
+    output_json_path = os.path.join(densities_dir, "densities.json")
+    logger.info(f"Using temp densities directory: {densities_dir}")
 
 # Camera websites list - updated with your provided URLs
 camera_websites = [
