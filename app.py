@@ -6,6 +6,10 @@ import threading
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
 from urllib.parse import urlparse, parse_qs, unquote
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import io
 
 # Initialize Flask
 app = Flask(__name__)
@@ -13,6 +17,110 @@ app = Flask(__name__)
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Google Drive setup
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+CLIENT_ID = os.environ.get('GOOGLE_DRIVE_CLIENT_ID')
+CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET')
+REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
+FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+
+# File names for density data
+TODAY_DENSITIES_FILE = "today_densities.json"
+YESTERDAY_DENSITIES_FILE = "yesterday_densities.json"
+CRITICAL_DENSITIES_FILE = "critical_densities.json"
+OUTPUT_JSON_FILE = "densities.json"
+
+# Initialize Google Drive service
+drive_service = None
+
+def init_google_drive():
+    global drive_service
+    try:
+        creds = Credentials(
+            None,
+            refresh_token=REFRESH_TOKEN,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES,
+            token_uri="https://oauth2.googleapis.com/token"
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+        logger.info("Google Drive service initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Drive: {e}")
+        drive_service = None
+
+# Utility functions for Google Drive operations
+def get_file_id(filename):
+    try:
+        query = f"'{FOLDER_ID}' in parents and name = '{filename}' and trashed = false"
+        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get('files', [])
+        if files:
+            return files[0]['id']
+        return None
+    except Exception as e:
+        logger.error(f"Error finding file {filename} in Google Drive: {e}")
+        return None
+
+def upload_json_to_drive(filename, data):
+    try:
+        # Convert data to JSON string and write to a temporary file
+        temp_file = f"/tmp/{filename}"
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        file_id = get_file_id(filename)
+        media = MediaFileUpload(temp_file, mimetype='application/json')
+        
+        if file_id:
+            # Update existing file
+            drive_service.files().update(
+                fileId=file_id,
+                media_body=media
+            ).execute()
+            logger.info(f"Updated {filename} in Google Drive")
+        else:
+            # Create new file
+            file_metadata = {
+                'name': filename,
+                'parents': [FOLDER_ID],
+                'mimeType': 'application/json'
+            }
+            drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+            logger.info(f"Uploaded {filename} to Google Drive")
+        
+        # Clean up temporary file
+        os.remove(temp_file)
+    except Exception as e:
+        logger.error(f"Error uploading {filename} to Google Drive: {e}")
+
+def download_json_from_drive(filename):
+    try:
+        file_id = get_file_id(filename)
+        if not file_id:
+            logger.warning(f"File {filename} not found in Google Drive")
+            return None
+        
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        
+        fh.seek(0)
+        data = json.loads(fh.read().decode('utf-8'))
+        logger.info(f"Downloaded {filename} from Google Drive")
+        return data
+    except Exception as e:
+        logger.error(f"Error downloading {filename} from Google Drive: {e}")
+        return None
 
 # Base URL and default parameters for the camera feed
 main_url = "https://giaothong.hochiminhcity.gov.vn"
@@ -23,40 +131,7 @@ default_params = {
     "h": 230
 }
 
-# Paths for models and output
-base_directory = os.environ.get('BASE_DIR', os.getcwd())
-densities_dir = os.path.join(base_directory, "densities")
-today_densities_path = os.path.join(densities_dir, "today_densities.json")
-yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
-critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
-output_json_path = os.path.join(densities_dir, "densities.json")
-
-# Create directories if they don't exist (with error handling for permissions)
-try:
-    os.makedirs(densities_dir, exist_ok=True)
-    logger.info(f"Created densities directory: {densities_dir}")
-except PermissionError:
-    # Fallback to current directory if we can't create in base_directory
-    logger.warning(f"Permission denied for {densities_dir}, using current directory")
-    densities_dir = os.path.join(os.getcwd(), "densities")
-    today_densities_path = os.path.join(densities_dir, "today_densities.json")
-    yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
-    critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
-    output_json_path = os.path.join(densities_dir, "densities.json")
-    os.makedirs(densities_dir, exist_ok=True)
-    logger.info(f"Using fallback densities directory: {densities_dir}")
-except Exception as e:
-    logger.error(f"Error creating densities directory: {e}")
-    # Use temp directory as last resort
-    import tempfile
-    densities_dir = tempfile.mkdtemp(prefix="densities_")
-    today_densities_path = os.path.join(densities_dir, "today_densities.json")
-    yesterday_densities_path = os.path.join(densities_dir, "yesterday_densities.json")
-    critical_densities_path = os.path.join(densities_dir, "critical_densities.json")
-    output_json_path = os.path.join(densities_dir, "densities.json")
-    logger.info(f"Using temp densities directory: {densities_dir}")
-
-# Camera websites list - updated with your provided URLs
+# Camera websites list
 camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
@@ -66,7 +141,7 @@ camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
@@ -74,90 +149,51 @@ camera_websites = [
 
 # Parse camera data from URLs
 def parse_camera_data():
-    """Parse camera IDs and locations from the camera websites"""
     cameras = []
     camera_mapping = {}
-    
     for idx, url in enumerate(camera_websites):
         try:
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
-            
             camera_id = query_params.get('camId', [''])[0]
             camera_location = unquote(query_params.get('camLocation', [''])[0])
-            
             if camera_id and camera_location:
-                # Generate camera code (A, B, C, etc.)
-                camera_code = chr(65 + idx)  # A=65, B=66, etc.
-                
+                camera_code = chr(65 + idx)
                 cameras.append((camera_id, camera_location))
                 camera_mapping[camera_location] = camera_code
-                
                 logger.info(f"Parsed camera {camera_code}: {camera_location} (ID: {camera_id})")
         except Exception as e:
             logger.error(f"Error parsing camera URL {url}: {e}")
-    
     return cameras, camera_mapping
 
-# Generate cameras and mapping from the URLs
+# Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
-
-# Camera URL template - Update with your actual base URL
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
-# Lazy-load TensorFlow only when needed
-_tf = None
-_cv2 = None
-_np = None
-_requests = None
-_road_model = None
-_vehicle_model = None
-_session = None
-
-# Flag to control whether models are loaded or we use mock data
+# Lazy-load TensorFlow and other dependencies
+_tf, _cv2, _np, _requests, _road_model, _vehicle_model, _session = [None] * 7
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
-
-# Global variable to store last density update time
 last_density_update = None
 
 def load_dependencies():
-    """Lazily load dependencies only when needed"""
     global _tf, _cv2, _np, _requests, _session
-    
     if _tf is None:
         try:
-            # Configure TensorFlow for memory optimization before import
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
             os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-            os.environ['TF_MEMORY_ALLOCATION'] = '256MB'  # Limit TF memory
-            
-            # Import dependencies
+            os.environ['TF_MEMORY_ALLOCATION'] = '256MB'
             import tensorflow as tf
             import cv2
             import numpy as np
             import requests
-            
-            _tf = tf
-            _cv2 = cv2
-            _np = np
-            _requests = requests
-            
-            # Configure TensorFlow
-            # Use dynamic memory allocation
-            physical_devices = _tf.config.list_physical_devices('GPU') 
+            _tf, _cv2, _np, _requests = tf, cv2, np, requests
+            physical_devices = _tf.config.list_physical_devices('GPU')
             if physical_devices:
                 _tf.config.experimental.set_memory_growth(physical_devices[0], True)
-            
-            # Limit CPU usage
             _tf.config.threading.set_intra_op_parallelism_threads(1)
             _tf.config.threading.set_inter_op_parallelism_threads(1)
-            
-            # Create a session for making requests
             _session = _requests.Session()
-            _session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-            })
-            
+            _session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"})
             logger.info("Dependencies loaded successfully")
             return True
         except Exception as e:
@@ -166,243 +202,113 @@ def load_dependencies():
     return True
 
 def dice_loss(y_true, y_pred, smooth=1e-6):
-    """Define dice loss function for model loading"""
     if not load_dependencies():
         return 0
-        
     y_true_f = _tf.keras.backend.flatten(y_true)
     y_pred_f = _tf.keras.backend.flatten(y_pred)
     intersection = _tf.keras.backend.sum(y_true_f * y_pred_f)
     return 1 - ((2. * intersection + smooth) / (_tf.keras.backend.sum(y_true_f) + _tf.keras.backend.sum(y_pred_f) + smooth))
 
 def load_models():
-    """Load ML models with enhanced error handling and debugging"""
     global _road_model, _vehicle_model
-    
     logger.info("=============================================")
     logger.info("LOADING MODELS - FORCED ATTEMPT")
     logger.info("=============================================")
-    
     if not load_dependencies():
         logger.error("Failed to load dependencies - cannot load models")
         return False
-    
-    # Define model paths - use TF SavedModel directories
+    base_directory = os.environ.get('BASE_DIR', os.getcwd())
     road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
     vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
-    
-    # Check paths
-    logger.info(f"Checking for model files:")
-    logger.info(f"Road model path: {road_model_path}, exists: {os.path.exists(road_model_path)}")
-    logger.info(f"Vehicle model path: {vehicle_model_path}, exists: {os.path.exists(vehicle_model_path)}")
-    
-    # Log the contents of the base directory
+    logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, Vehicle: {os.path.exists(vehicle_model_path)}")
     try:
-        logger.info(f"Files in {base_directory}: {os.listdir(base_directory)}")
-    except Exception as e:
-        logger.error(f"Error listing base directory: {e}")
-    
-    # Check that the SavedModel files exist in the directories
-    road_saved_model = os.path.join(road_model_path, "saved_model.pb")
-    vehicle_saved_model = os.path.join(vehicle_model_path, "saved_model.pb")
-    
-    if not os.path.exists(road_saved_model):
-        logger.error(f"Road model SavedModel file NOT FOUND: {road_saved_model}")
-        return False
-    else:
-        logger.info(f"Road model SavedModel file FOUND: {road_saved_model}")
-        
-    if not os.path.exists(vehicle_saved_model):
-        logger.error(f"Vehicle model SavedModel file NOT FOUND: {vehicle_saved_model}")
-        return False
-    else:
-        logger.info(f"Vehicle model SavedModel file FOUND: {vehicle_saved_model}")
-    
-    # Try to load using tf.saved_model.load instead of keras.models.load_model
-    logger.info("Loading road segmentation model...")
-    try:
-        # Load models using tf.saved_model.load which is appropriate for SavedModel format
+        logger.info("Loading road segmentation model...")
         _road_model = _tf.saved_model.load(road_model_path)
-        logger.info("Road model loaded successfully!")
-        
-        # Add small delay to let memory settle
         time.sleep(1)
-        
-        # Try to load vehicle detection model
         logger.info("Loading vehicle detection model...")
         _vehicle_model = _tf.saved_model.load(vehicle_model_path)
-        logger.info("Vehicle model loaded successfully!")
-        
         logger.info("=============================================")
         logger.info("MODELS LOADED SUCCESSFULLY")
         logger.info("=============================================")
-        
         return True
     except Exception as e:
         logger.error(f"Error loading models: {str(e)}")
-        
-        # Print full traceback for debugging
         import traceback
         logger.error(traceback.format_exc())
-        
         logger.error("=============================================")
         logger.error("MODEL LOADING FAILED")
         logger.error("=============================================")
-        
         return False
 
 def preprocess_image(img):
-    """Preprocess image for model input with explicit float32 type"""
-    try:
-        if not load_dependencies():
-            return None
-            
-        # Apply CLAHE for contrast enhancement
-        ycrcb = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
-        y, cr, cb = _cv2.split(ycrcb)
-        clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        y = clahe.apply(y)
-        enhanced_img = _cv2.merge((y, cr, cb))
-        img = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
-        
-        # Resize to expected dimensions
-        img = _cv2.resize(img, (128, 128))
-        
-        # Convert to float32 explicitly (this is the key fix)
-        img = img.astype('float32') / 255.0
-        
-        img = _np.expand_dims(img, axis=0)
-        return img
-    except Exception as e:
-        logger.error(f"Error preprocessing image: {e}")
+    if not load_dependencies() or img is None:
         return None
+    ycrcb = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
+    y, cr, cb = _cv2.split(ycrcb)
+    clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    y = clahe.apply(y)
+    enhanced_img = _cv2.merge((y, cr, cb))
+    img = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
+    img = _cv2.resize(img, (128, 128))
+    img = img.astype('float32') / 255.0
+    return _np.expand_dims(img, axis=0)
 
 def check_new_day():
-    """Check if it's a new day and transfer today's densities to yesterday"""
     today = datetime.now().date()
-    
-    # Load today's densities
-    today_densities = {}
-    if os.path.exists(today_densities_path):
-        try:
-            with open(today_densities_path, 'r', encoding='utf-8') as f:
-                today_densities = json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading today_densities.json: {e}")
-            today_densities = {}
-    
-    # Check if the date has changed
+    today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
     if 'date' in today_densities:
         try:
             file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
             if file_date < today:
-                # It's a new day, transfer today's data to yesterday
                 logger.info(f"New day detected. Transferring data from {file_date} to yesterday")
-                
-                # Save current today's densities as yesterday's
-                with open(yesterday_densities_path, 'w', encoding='utf-8') as f:
-                    json.dump(today_densities, f, ensure_ascii=False, indent=2)
-                
-                # Update critical densities with max values from yesterday
+                upload_json_to_drive(YESTERDAY_DENSITIES_FILE, today_densities)
                 update_critical_densities(today_densities)
-                
-                # Reset today's densities
-                today_densities = {
-                    'date': today.strftime('%Y-%m-%d'),
-                    'densities_by_time': {}
-                }
-                
-                with open(today_densities_path, 'w', encoding='utf-8') as f:
-                    json.dump(today_densities, f, ensure_ascii=False, indent=2)
-                
+                today_densities = {'date': today.strftime('%Y-%m-%d'), 'densities_by_time': {}}
+                upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
                 logger.info("Successfully transferred data to yesterday and reset today's data")
         except Exception as e:
             logger.error(f"Error processing date change: {e}")
 
 def update_critical_densities(densities_data):
-    """Update critical densities with the highest values from the day"""
     try:
-        # Load existing critical densities
-        critical_densities = {}
-        if os.path.exists(critical_densities_path):
-            with open(critical_densities_path, 'r', encoding='utf-8') as f:
-                critical_densities = json.load(f)
-        
-        # Find maximum densities from the day's data
+        critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE) or {}
         densities_by_time = densities_data.get('densities_by_time', {})
-        
         for camera_code in camera_mapping.values():
             max_density = 0.0
-            
-            # Go through all timestamps for this camera
             for timestamp, cameras_data in densities_by_time.items():
                 if camera_code in cameras_data:
                     density = cameras_data[camera_code].get('density', 0.0)
                     max_density = max(max_density, density)
-            
-            # Update critical density if this is higher
             if camera_code not in critical_densities or max_density > critical_densities[camera_code]:
                 critical_densities[camera_code] = max_density
                 logger.info(f"Updated critical density for {camera_code}: {max_density}")
-        
-        # Save critical densities
-        with open(critical_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(critical_densities, f, ensure_ascii=False, indent=2)
-        
+        upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
         logger.info("Critical densities updated successfully")
-        
     except Exception as e:
         logger.error(f"Error updating critical densities: {e}")
 
 def manage_historical_densities():
-    """Manage historical density data"""
-    today = datetime.now().date()
-    
-    # Check for new day
     check_new_day()
-    
-    # Initialize today's densities if not exists
-    today_densities = {}
-    if os.path.exists(today_densities_path):
-        try:
-            with open(today_densities_path, 'r', encoding='utf-8') as f:
-                today_densities = json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading today_densities.json: {e}")
-            today_densities = {}
-    
-    if 'date' not in today_densities or today_densities['date'] != today.strftime('%Y-%m-%d'):
+    today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
+    if 'date' not in today_densities or today_densities['date'] != datetime.now().date().strftime('%Y-%m-%d'):
         today_densities = {
-            'date': today.strftime('%Y-%m-%d'),
+            'date': datetime.now().date().strftime('%Y-%m-%d'),
             'densities_by_time': {}
         }
-        
-        with open(today_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(today_densities, f, ensure_ascii=False, indent=2)
-    
-    # Initialize critical densities if not exists
-    if not os.path.exists(critical_densities_path):
-        sample_critical_densities = {}
-        for camera_code in camera_mapping.values():
-            sample_critical_densities[camera_code] = 80.0  # Default critical density
-        
-        with open(critical_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(sample_critical_densities, f, ensure_ascii=False, indent=2)
-    
+        upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
+    critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
+    if not critical_densities:
+        sample_critical_densities = {code: 80.0 for code in camera_mapping.values()}
+        upload_json_to_drive(CRITICAL_DENSITIES_FILE, sample_critical_densities)
     return today_densities
 
 def fetch_camera_image(camera_id):
-    """Fetch camera image by mimicking a browser session"""
     if not load_dependencies():
         return None
-         
     try:
-        # Reset session if it doesn't exist
         global _session
         if _session is None:
             _session = _requests.Session()
-         
-        # Use a common browser User-Agent
         _session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -411,37 +317,23 @@ def fetch_camera_image(camera_id):
             "Upgrade-Insecure-Requests": "1",
             "Referer": "https://giaothong.hochiminhcity.gov.vn/"
         })
-         
-        # First, visit the main website to get cookies/session
-        logger.info("Visiting main website to establish session")
-        main_response = _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
-        if main_response.status_code != 200:
-            logger.warning(f"Failed to access main website: {main_response.status_code}")
-         
-        # Build URL with camera ID
+        _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
         url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
         logger.info(f"Fetching image from {url}")
-         
-        # Now fetch the camera image with the established session
         response = _session.get(url, timeout=10)
         response.raise_for_status()
-         
-        # Convert response to image
         image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
         image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-         
         if image is None:
             logger.warning(f"Failed to decode image from {url}")
             return None
-         
         return image
     except _requests.exceptions.HTTPError as e:
         if e.response.status_code == 403:
             logger.error(f"403 Forbidden for {url}: Check API key or server permissions")
-            # Log the full response for debugging
             try:
                 logger.error(f"Response headers: {e.response.headers}")
-                logger.error(f"Response content: {e.response.text[:500]}")  # First 500 chars
+                logger.error(f"Response content: {e.response.text[:500]}")
             except:
                 pass
         else:
@@ -452,274 +344,160 @@ def fetch_camera_image(camera_id):
         return None
 
 def analyze_image(image):
-    """Analyze the image with ML models - adjusted to handle 12-channel output"""
     if not load_dependencies() or image is None:
-        # Return zero if dependencies aren't loaded or image is None
-        return {
-            "density": 0.0
-        }
-    
+        return {"density": 0.0}
     try:
-        # Skip model analysis if models aren't loaded
         if _road_model is None or _vehicle_model is None:
             logger.warning("Models not loaded, using fallback values")
-            return {
-                "density": 0.0
-            }
-        
-        # Preprocess image with correct float32 data type
+            return {"density": 0.0}
         processed_image = preprocess_image(image)
         if processed_image is None:
-            return {
-                "density": 0.0
-            }
-        
-        # Ensure image is float32 before passing to the model
-        if processed_image.dtype != 'float32':
-            processed_image = processed_image.astype('float32')
-        
-        # Use models with correct data type for input
+            return {"density": 0.0}
         input_tensor = _tf.convert_to_tensor(processed_image, dtype=_tf.float32)
-        
         try:
-            # Use named arguments to match the signature
             vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor=input_tensor)
             vehicle_output = list(vehicle_prediction.values())[0]
-            
-            # Extract value for density - the vehicle model has 12 channels
             vehicle_output_np = vehicle_output.numpy()
-            
-            # Log the output shape to debug
             logger.info(f"Vehicle output shape: {vehicle_output_np.shape}")
-            
-            # Calculate density based on all 12 channels - apply different weights
-            # First channel might be background, so we can exclude it or weight it differently
-            # Assuming channels 1-11 represent different vehicle types or densities
             if vehicle_output_np.shape[-1] == 12:
-                # Extract different density components - adjust these weights based on your model's output
-                # This is a sample weighting scheme - you should adjust based on what each channel represents
-                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]  # Example weights
-                
-                # Apply weights to each channel
-                weighted_sum = 0
-                for i in range(1, 12):  # Skip channel 0 (background)
-                    channel_mean = float(_np.mean(vehicle_output_np[..., i]))
-                    weighted_sum += channel_mean * weights[i]
-                
-                # Scale to a reasonable density range (0-100)
-                density = weighted_sum * 100
-                
-                # Ensure density is between 0 and 100
-                density = max(0, min(100, density))
-                
-                logger.info(f"Calculated weighted density: {density}")
+                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]
+                weighted_sum = sum(float(_np.mean(vehicle_output_np[..., i])) * weights[i] for i in range(1, 12))
+                density = max(0, min(100, weighted_sum * 100))
             else:
-                # Fallback if the output shape is unexpected
                 density = float(_np.mean(vehicle_output_np) * 100)
-                logger.info(f"Fallback density calculation: {density}")
-            
-            # Return the density value
-            return {
-                "density": round(density, 1)
-            }
+            logger.info(f"Calculated weighted density: {density}")
+            return {"density": round(density, 1)}
         except Exception as e:
             logger.error(f"Error during model prediction: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            
-            # Fallback to random values between 10 and 90
-            if _np is not None:
+            if _np:
                 density = round(_np.random.uniform(10.0, 90.0), 1)
             else:
                 import random
                 density = round(random.uniform(10.0, 90.0), 1)
-                
-            return {
-                "density": density
-            }
+            return {"density": density}
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return {
-            "density": 0.0
-        }
+        return {"density": 0.0}
 
 def store_today_density(timestamp_str, camera_code, density_data):
-    """Store density data for today"""
     try:
-        # Load today's densities
-        today_densities = {}
-        if os.path.exists(today_densities_path):
-            with open(today_densities_path, 'r', encoding='utf-8') as f:
-                today_densities = json.load(f)
-        
-        # Initialize structure if not exists
+        today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
         if 'densities_by_time' not in today_densities:
             today_densities['densities_by_time'] = {}
-        
         if timestamp_str not in today_densities['densities_by_time']:
             today_densities['densities_by_time'][timestamp_str] = {}
-        
-        # Store the density data
         today_densities['densities_by_time'][timestamp_str][camera_code] = density_data
-        
-        # Save back to file
-        with open(today_densities_path, 'w', encoding='utf-8') as f:
-            json.dump(today_densities, f, ensure_ascii=False, indent=2)
-        
+        upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
     except Exception as e:
         logger.error(f"Error storing today's density: {e}")
 
 def fetch_and_process_densities():
-    """Fetch and process density data with browser mimicking and fallback"""
     global last_density_update
-    
-    # Current timestamp
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     last_density_update = datetime.now()
-    
-    # Initialize results
-    results = {
-        "timestamp": timestamp_str,
-        "cameras": {}
-    }
-    
-    # Count success and failure
-    success_count = 0
-    failure_count = 0
-    
-    # Process each camera
+    results = {"timestamp": timestamp_str, "cameras": {}}
+    success_count, failure_count = 0, 0
     for camera_id, camera_name in cameras:
         try:
             logger.info(f"Processing camera {camera_name}")
-            
-            # Get camera code
             camera_code = camera_mapping.get(camera_name, camera_name)
-            
-            # Fetch camera image
             image = fetch_camera_image(camera_id)
-            
             if image is None:
-                # Image fetch failed, use simulated data
                 failure_count += 1
                 logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
-                
-                # Generate random density
-                if _np is None:
+                if _np:
+                    density = round(_np.random.uniform(10.0, 90.0), 1)
+                else:
                     import random
                     density = round(random.uniform(10.0, 90.0), 1)
-                else:
-                    density = round(_np.random.uniform(10.0, 90.0), 1)
             else:
-                # Image fetch succeeded, use real data
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
-                
-                # Analyze the image
                 analysis_result = analyze_image(image)
                 density = analysis_result["density"]
-            
-            # Prepare density data
-            density_data = {
-                "name": camera_name,
-                "density": density,
-                "timestamp": timestamp_str
-            }
-            
-            # Add to results
+            density_data = {"name": camera_name, "density": density, "timestamp": timestamp_str}
             results["cameras"][camera_code] = density_data
-            
-            # Store in today's densities
             store_today_density(timestamp_str, camera_code, density_data)
-            
             logger.info(f"Processed camera {camera_name}: density={density}")
-            
         except Exception as e:
             logger.error(f"Error processing camera {camera_name}: {e}")
             failure_count += 1
-            
-            # Add default values on error
-            density_data = {
-                "name": camera_name,
-                "density": 0.0,
-                "timestamp": timestamp_str
-            }
+            density_data = {"name": camera_name, "density": 0.0, "timestamp": timestamp_str}
             results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
             store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
-    
-    # Log success/failure statistics
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
-    
-    # Save results
     try:
-        with open(output_json_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        upload_json_to_drive(OUTPUT_JSON_FILE, results)
     except Exception as e:
-        logger.error(f"Error saving densities.json: {e}")
-    
+        logger.error(f"Error saving densities.json to Google Drive: {e}")
     return results
 
 def density_worker():
-    """Background worker to process densities every 30 seconds"""
     logger.info("Density worker initialized - running every 30 seconds")
-    
     try:
-        # Initial run without delay
         logger.info("Starting initial density calculation")
         manage_historical_densities()
         fetch_and_process_densities()
         logger.info("Initial density calculation completed")
-        
         while True:
             try:
                 logger.info("Starting density processing cycle (30-second interval)")
                 fetch_and_process_densities()
                 logger.info("Density processing cycle completed")
-                time.sleep(30)  # Update every 30 seconds as requested
+                time.sleep(30)
             except Exception as e:
                 logger.error(f"Error in density worker cycle: {e}")
-                time.sleep(10)  # Shorter retry interval on error
+                time.sleep(10)
     except Exception as e:
         logger.error(f"Critical error in density worker: {e}")
 
-# Start the density worker thread
 def start_worker():
-    """Start worker with focus on model loading"""
     try:
         logger.info("Starting worker - FOCUSING ON MODEL LOADING")
-        
-        # Force load models - this is now our primary focus
         logger.info("Attempting to load models (forced)...")
-        
         load_success = load_models()
         if load_success:
             logger.info("Models loaded successfully!")
         else:
             logger.error("Failed to load models! Check logs for details.")
-            
-            # Try to diagnose the issue
             if not load_dependencies():
                 logger.error("Problem: Dependencies failed to load")
-            elif not os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf")):
+            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf")):
                 logger.error("Problem: Road model file not found")
-            elif not os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf")):
+            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf")):
                 logger.error("Problem: Vehicle model file not found")
             else:
                 logger.error("Problem: Unclear - check model format or TensorFlow compatibility")
-        
-        # Start the density worker
         logger.info("Starting density worker thread...")
         density_thread = threading.Thread(target=density_worker, daemon=True)
         density_thread.start()
         logger.info("Density worker thread started")
-        
     except Exception as e:
         logger.error(f"Failed to start worker: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
 
-# Flask routes
+# Date transition worker for precise midnight updates
+def date_transition_worker():
+    while True:
+        now = datetime.now()
+        midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+        seconds_until_midnight = (midnight - now).total_seconds()
+        time.sleep(seconds_until_midnight + 1)
+        check_new_day()
+        logger.info(f"Date transition completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+# Initialize Google Drive and start workers
+if __name__ != "__main__":
+    init_google_drive()
+    if drive_service is None:
+        logger.error("Google Drive initialization failed. Application may not function correctly.")
+    else:
+        threading.Thread(target=date_transition_worker, daemon=True).start()
+        start_worker()
+
 @app.route('/')
 def index():
     return jsonify({
@@ -732,20 +510,8 @@ def index():
 
 @app.route('/cameras')
 def get_cameras():
-    """Route 1: Fetch all camera information"""
     try:
-        cameras_info = []
-        
-        for idx, (camera_id, camera_location) in enumerate(cameras):
-            camera_code = chr(65 + idx)  # A, B, C, etc.
-            
-            cameras_info.append({
-                "code": camera_code,
-                "id": camera_id,
-                "name": camera_location,
-                "url": camera_websites[idx] if idx < len(camera_websites) else None
-            })
-        
+        cameras_info = [{"code": chr(65 + idx), "id": camera_id, "name": camera_location, "url": camera_websites[idx] if idx < len(camera_websites) else None} for idx, (camera_id, camera_location) in enumerate(cameras)]
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_cameras": len(cameras_info),
@@ -753,134 +519,87 @@ def get_cameras():
         })
     except Exception as e:
         logger.error(f"Error fetching cameras: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/live-densities')
 def get_live_densities():
-    """Route 2: Fetch current live densities (recalculated every 30 seconds)"""
     try:
-        # Check if file exists
-        if not os.path.exists(output_json_path):
+        densities = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not densities:
             return jsonify({
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        
-        # Read the current densities
-        with open(output_json_path, 'r', encoding='utf-8') as f:
-            densities = json.load(f)
-        
-        # Add update information
         densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         densities["update_interval"] = "30 seconds"
-        densities["next_update_in"] = None
-        
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
-            if time_until_next.total_seconds() > 0:
-                densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds"
-            else:
-                densities["next_update_in"] = "Updating now..."
-        
+            densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(densities)
     except Exception as e:
         logger.error(f"Error reading live densities: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/today-densities')
 def get_today_densities():
-    """Route 3: Get today's stored densities for all nodes"""
     try:
-        if not os.path.exists(today_densities_path):
+        today_densities = download_json_from_drive(TODAY_DENSITIES_FILE)
+        if not today_densities:
             manage_historical_densities()
-        
-        with open(today_densities_path, 'r', encoding='utf-8') as f:
-            today_densities = json.load(f)
-        
+            today_densities = download_json_from_drive(TODAY_DENSITIES_FILE)
         return jsonify(today_densities)
     except Exception as e:
         logger.error(f"Error reading today's densities: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/yesterday-densities')
 def get_yesterday_densities():
-    """Route 4: Get yesterday's stored densities for all nodes"""
     try:
-        if not os.path.exists(yesterday_densities_path):
+        yesterday_densities = download_json_from_drive(YESTERDAY_DENSITIES_FILE)
+        if not yesterday_densities:
             return jsonify({
                 "message": "No yesterday data available yet",
                 "date": None,
                 "densities_by_time": {}
             })
-        
-        with open(yesterday_densities_path, 'r', encoding='utf-8') as f:
-            yesterday_densities = json.load(f)
-        
         return jsonify(yesterday_densities)
     except Exception as e:
         logger.error(f"Error reading yesterday's densities: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/critical-densities')
 def get_critical_densities():
-    """Route 5: Get critical densities (most crowded from today and yesterday)"""
     try:
-        if not os.path.exists(critical_densities_path):
+        critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
+        if not critical_densities:
             manage_historical_densities()
-        
-        with open(critical_densities_path, 'r', encoding='utf-8') as f:
-            critical_densities = json.load(f)
-        
-        # Add metadata
+            critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
         result = {
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "description": "Critical density thresholds based on historical maximum values",
             "critical_densities": critical_densities
         }
-        
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error reading critical densities: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/densities')
 def get_densities():
-    """Legacy route for backward compatibility"""
     try:
-        # Check if file exists
-        if not os.path.exists(output_json_path):
+        densities = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not densities:
             manage_historical_densities()
-        
-        # Read the file
-        with open(output_json_path, 'r', encoding='utf-8') as f:
-            densities = json.load(f)
-            
-            # Extract just the raw density values by camera code
-            raw_densities = {}
-            for camera_code, camera_data in densities["cameras"].items():
-                raw_densities[camera_code] = camera_data["density"]
-            
-            return jsonify(raw_densities)
+            densities = download_json_from_drive(OUTPUT_JSON_FILE)
+        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in densities["cameras"].items()}
+        return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/status')
 def status():
-    """Memory-efficient status endpoint"""
     return jsonify({
         "status": "running",
         "memory_optimized": True,
@@ -894,23 +613,19 @@ def status():
 @app.route('/health')
 def health_check():
     try:
-        # Check if directories exist
-        densities_exists = os.path.exists(densities_dir)
-        output_exists = os.path.exists(output_json_path)
-        today_exists = os.path.exists(today_densities_path)
-        yesterday_exists = os.path.exists(yesterday_densities_path)
-        critical_exists = os.path.exists(critical_densities_path)
-        
+        today_exists = bool(get_file_id(TODAY_DENSITIES_FILE))
+        yesterday_exists = bool(get_file_id(YESTERDAY_DENSITIES_FILE))
+        critical_exists = bool(get_file_id(CRITICAL_DENSITIES_FILE))
+        output_exists = bool(get_file_id(OUTPUT_JSON_FILE))
         return jsonify({
             "status": "healthy",
-            "filesystem": {
-                "densities_dir_exists": densities_exists,
-                "output_file_exists": output_exists,
+            "storage": {
+                "backend": "Google Drive",
+                "folder_id": FOLDER_ID,
                 "today_densities_exists": today_exists,
                 "yesterday_densities_exists": yesterday_exists,
                 "critical_densities_exists": critical_exists,
-                "densities_dir": densities_dir,
-                "output_path": output_json_path
+                "output_file_exists": output_exists
             },
             "using_models": USE_MODELS,
             "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
@@ -924,7 +639,6 @@ def health_check():
 
 @app.route('/refresh')
 def refresh_densities():
-    """Manually trigger a refresh of density data"""
     try:
         result = fetch_and_process_densities()
         return jsonify({
@@ -940,21 +654,11 @@ def refresh_densities():
 
 @app.route('/debug')
 def debug():
-    """Debug endpoint to check environment variables and model files"""
     try:
-        # Check for model files
         model_info = {
-            "unet_road_segmentation_tf": {
-                "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf")),
-                "saved_model_exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf", "saved_model.pb"))
-            },
-            "unet_multi_classV1_tf": {
-                "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf")),
-                "saved_model_exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf", "saved_model.pb"))
-            }
+            "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
+            "unet_multi_classV1_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))}
         }
-        
-        # Get environment variables
         env_vars = {
             "USE_MODELS_RAW": os.environ.get('USE_MODELS', 'not set'),
             "USE_MODELS_PROCESSED": USE_MODELS,
@@ -962,32 +666,26 @@ def debug():
             "TF_MEMORY_ALLOCATION": os.environ.get('TF_MEMORY_ALLOCATION', 'not set'),
             "TF_FORCE_GPU_ALLOW_GROWTH": os.environ.get('TF_FORCE_GPU_ALLOW_GROWTH', 'not set'),
             "PORT": os.environ.get('PORT', 'not set'),
-            "CAMERA_URL_TEMPLATE": os.environ.get('CAMERA_URL_TEMPLATE', 'not set')
+            "CAMERA_URL_TEMPLATE": os.environ.get('CAMERA_URL_TEMPLATE', 'not set'),
+            "GOOGLE_DRIVE_FOLDER_ID": FOLDER_ID
         }
-        
-        # Check densities directory and files
-        densities_info = {
-            "densities_dir_exists": os.path.exists(densities_dir),
-            "today_densities_exists": os.path.exists(today_densities_path),
-            "yesterday_densities_exists": os.path.exists(yesterday_densities_path),
-            "critical_densities_exists": os.path.exists(critical_densities_path),
-            "output_json_exists": os.path.exists(output_json_path)
+        storage_info = {
+            "backend": "Google Drive",
+            "folder_id": FOLDER_ID,
+            "today_densities_exists": bool(get_file_id(TODAY_DENSITIES_FILE)),
+            "yesterday_densities_exists": bool(get_file_id(YESTERDAY_DENSITIES_FILE)),
+            "critical_densities_exists": bool(get_file_id(CRITICAL_DENSITIES_FILE)),
+            "output_json_exists": bool(get_file_id(OUTPUT_JSON_FILE))
         }
-        
-        # List files in base directory
         try:
-            files_in_base_dir = os.listdir(base_directory)
+            files_in_base_dir = os.listdir(os.environ.get('BASE_DIR', os.getcwd()))
         except Exception as e:
             files_in_base_dir = f"Error listing files: {str(e)}"
-        
-        # Check model loading status
         model_load_status = {
             "road_model_loaded": _road_model is not None,
             "vehicle_model_loaded": _vehicle_model is not None,
             "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None
         }
-        
-        # Get system resources
         try:
             import psutil
             memory_info = {
@@ -999,15 +697,14 @@ def debug():
             }
         except Exception as e:
             memory_info = f"Error getting system resources: {str(e)}"
-        
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "model_files": model_info,
             "model_load_status": model_load_status,
             "environment_variables": env_vars,
-            "base_directory": base_directory,
+            "base_directory": os.environ.get('BASE_DIR', os.getcwd()),
             "files_in_base_directory": files_in_base_dir,
-            "densities_info": densities_info,
+            "storage_info": storage_info,
             "system_resources": memory_info,
             "cameras_parsed": len(cameras),
             "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
@@ -1022,42 +719,24 @@ def debug():
 
 @app.route('/load-models')
 def force_load_models():
-    """Force model loading and return detailed status"""
     try:
         load_success = load_models()
-        
-        # Check model loading status
         road_loaded = _road_model is not None
         vehicle_loaded = _vehicle_model is not None
-        
-        # Prepare status response
         status = {
             "load_attempt_success": load_success,
-            "models_loaded": {
-                "road_model": road_loaded,
-                "vehicle_model": vehicle_loaded
-            },
+            "models_loaded": {"road_model": road_loaded, "vehicle_model": vehicle_loaded},
             "model_files": {
-                "road_model": {
-                    "exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation_tf"))
-                },
-                "vehicle_model": {
-                    "exists": os.path.exists(os.path.join(base_directory, "unet_multi_classV1_tf"))
-                }
+                "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
+                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))}
             },
-            "environment": {
-                "USE_MODELS": USE_MODELS,
-                "BASE_DIR": base_directory
-            },
+            "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
-        
         return jsonify(status)
-        
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        
         return jsonify({
             "success": False,
             "error": str(e),
@@ -1067,40 +746,20 @@ def force_load_models():
 
 @app.route('/debug-model')
 def debug_model():
-    """Debug endpoint to check model signature and test with random data"""
     try:
         if not load_dependencies():
-            return jsonify({
-                "error": "Dependencies not loaded",
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }), 500
-        
+            return jsonify({"error": "Dependencies not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         if _road_model is None or _vehicle_model is None:
-            return jsonify({
-                "error": "Models not loaded",
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }), 500
-        
-        # Get signature information for road model
+            return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         road_sig = _road_model.signatures['serving_default'].structured_input_signature
         road_output_sig = _road_model.signatures['serving_default'].structured_outputs
-        
-        # Get signature information for vehicle model
         vehicle_sig = _vehicle_model.signatures['serving_default'].structured_input_signature
         vehicle_output_sig = _vehicle_model.signatures['serving_default'].structured_outputs
-        
-        # Create a simple test input
         test_input = _np.zeros((1, 128, 128, 3), dtype='float32')
         tf_input = _tf.convert_to_tensor(test_input, dtype=_tf.float32)
-        
-        # Test prediction (don't log errors, just check if it works)
-        road_success = False
-        vehicle_success = False
-        road_error = None
-        vehicle_error = None
-        
+        road_success, vehicle_success = False, False
+        road_error, vehicle_error = None, None
         try:
-            # Extract input argument name if available
             if len(road_sig) > 1 and len(road_sig[1]) > 0:
                 input_name = list(road_sig[1].keys())[0]
                 inputs_dict = {input_name: tf_input}
@@ -1110,9 +769,7 @@ def debug_model():
             road_success = True
         except Exception as e:
             road_error = str(e)
-        
         try:
-            # Extract input argument name if available
             if len(vehicle_sig) > 1 and len(vehicle_sig[1]) > 0:
                 input_name = list(vehicle_sig[1].keys())[0]
                 inputs_dict = {input_name: tf_input}
@@ -1122,119 +779,47 @@ def debug_model():
             vehicle_success = True
         except Exception as e:
             vehicle_error = str(e)
-        
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "models_loaded": {
-                "road_model": _road_model is not None,
-                "vehicle_model": _vehicle_model is not None
-            },
+            "models_loaded": {"road_model": _road_model is not None, "vehicle_model": _vehicle_model is not None},
             "model_signatures": {
-                "road_model": {
-                    "input_signature": str(road_sig),
-                    "output_signature": str(road_output_sig)
-                },
-                "vehicle_model": {
-                    "input_signature": str(vehicle_sig),
-                    "output_signature": str(vehicle_output_sig)
-                }
+                "road_model": {"input_signature": str(road_sig), "output_signature": str(road_output_sig)},
+                "vehicle_model": {"input_signature": str(vehicle_sig), "output_signature": str(vehicle_output_sig)}
             },
-            "test_prediction": {
-                "road_model": {
-                    "success": road_success,
-                    "error": road_error
-                },
-                "vehicle_model": {
-                    "success": vehicle_success,
-                    "error": vehicle_error
-                }
-            }
+            "test_prediction": {"road_model": {"success": road_success, "error": road_error}, "vehicle_model": {"success": vehicle_success, "error": vehicle_error}}
         })
     except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }), 500
+        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
 
 @app.route('/camera-status')
 def check_camera_status():
-    """Check if all cameras are working and return their status"""
     try:
-        # Initialize results
-        results = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "cameras": {}
-        }
-        
-        # Load dependencies if not already loaded
+        results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
         if not load_dependencies():
-            return jsonify({
-                "error": "Failed to load dependencies",
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }), 500
-        
-        # Check each camera
+            return jsonify({"error": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         for camera_id, camera_name in cameras:
-            # Get camera code
             camera_code = camera_mapping.get(camera_name, camera_name)
-            
-            # Try to fetch image
             try:
                 logger.info(f"Checking camera {camera_name}")
                 image = fetch_camera_image(camera_id)
-                
                 if image is None:
-                    # Camera fetch failed
-                    results["cameras"][camera_code] = {
-                        "name": camera_name,
-                        "status": "offline",
-                        "error": "Failed to fetch image"
-                    }
+                    results["cameras"][camera_code] = {"name": camera_name, "status": "offline", "error": "Failed to fetch image"}
+                elif image.size > 1000:
+                    results["cameras"][camera_code] = {"name": camera_name, "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
                 else:
-                    # Camera fetch succeeded
-                    # Check if image is valid (not just an error page)
-                    # This is a simple check - you might need a more sophisticated one
-                    if image.size > 1000:  # If image has reasonable size
-                        results["cameras"][camera_code] = {
-                            "name": camera_name,
-                            "status": "online",
-                            "resolution": f"{image.shape[1]}x{image.shape[0]}"
-                        }
-                    else:
-                        results["cameras"][camera_code] = {
-                            "name": camera_name,
-                            "status": "error",
-                            "error": "Retrieved image is too small or invalid"
-                        }
+                    results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": "Retrieved image is too small or invalid"}
             except Exception as e:
-                # Error processing this camera
-                results["cameras"][camera_code] = {
-                    "name": camera_name,
-                    "status": "error",
-                    "error": str(e)
-                }
-        
+                results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": str(e)}
         return jsonify(results)
     except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }), 500
-
-# Start the worker when the app starts
-if __name__ != "__main__":
-    # Only start worker when running with Gunicorn, not during flask development server
-    start_worker()
+        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
 
 if __name__ == "__main__":
-    # Initialize data files
+    init_google_drive()
+    if drive_service is None:
+        logger.error("Google Drive initialization failed. Exiting.")
+        exit(1)
     manage_historical_densities()
-    
-    # Start the density worker thread
     start_worker()
-    
-    # Get the port from environment variable or use default
     port = int(os.environ.get("PORT", 10000))
-    
-    # Run the Flask app
     app.run(host='0.0.0.0', port=port, debug=True)
