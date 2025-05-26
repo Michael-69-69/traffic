@@ -10,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
+import pytz  # For timezone support
 
 # Initialize Flask
 app = Flask(__name__)
@@ -17,6 +18,9 @@ app = Flask(__name__)
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Set Vietnam timezone (+07)
+VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 
 # Google Drive setup
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -28,6 +32,8 @@ FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 # File names for density data
 TODAY_DENSITIES_FILE = "today_densities.json"
 YESTERDAY_DENSITIES_FILE = "yesterday_densities.json"
+DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE = "day_before_yesterday_max_densities.json"  # New file for max only
+YESTERDAY_MAX_DENSITIES_FILE = "yesterday_max_densities.json"
 CRITICAL_DENSITIES_FILE = "critical_densities.json"
 OUTPUT_JSON_FILE = "densities.json"
 
@@ -66,7 +72,6 @@ def get_file_id(filename):
 
 def upload_json_to_drive(filename, data):
     try:
-        # Convert data to JSON string and write to a temporary file
         temp_file = f"/tmp/{filename}"
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -75,27 +80,13 @@ def upload_json_to_drive(filename, data):
         media = MediaFileUpload(temp_file, mimetype='application/json')
         
         if file_id:
-            # Update existing file
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=media
-            ).execute()
+            drive_service.files().update(fileId=file_id, media_body=media).execute()
             logger.info(f"Updated {filename} in Google Drive")
         else:
-            # Create new file
-            file_metadata = {
-                'name': filename,
-                'parents': [FOLDER_ID],
-                'mimeType': 'application/json'
-            }
-            drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
+            file_metadata = {'name': filename, 'parents': [FOLDER_ID], 'mimeType': 'application/json'}
+            drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
             logger.info(f"Uploaded {filename} to Google Drive")
         
-        # Clean up temporary file
         os.remove(temp_file)
     except Exception as e:
         logger.error(f"Error uploading {filename} to Google Drive: {e}")
@@ -125,13 +116,9 @@ def download_json_from_drive(filename):
 # Base URL and default parameters for the camera feed
 main_url = "https://giaothong.hochiminhcity.gov.vn"
 base_url = "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx"
-default_params = {
-    "bg": "black",
-    "w": 300,
-    "h": 230
-}
+default_params = {"bg": "black", "w": 300, "h": 230}
 
-# Camera websites list
+# Camera websites list (unchanged)
 camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
@@ -141,7 +128,7 @@ camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
@@ -253,19 +240,50 @@ def preprocess_image(img):
     img = img.astype('float32') / 255.0
     return _np.expand_dims(img, axis=0)
 
+def get_vietnam_time():
+    """Get the current time in Vietnam timezone."""
+    return datetime.now(VIETNAM_TZ)
+
 def check_new_day():
-    today = datetime.now().date()
+    today = get_vietnam_time().date()
     today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
     if 'date' in today_densities:
         try:
             file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
             if file_date < today:
                 logger.info(f"New day detected. Transferring data from {file_date} to yesterday")
+                # Fetch existing yesterday's data to calculate day before yesterday max
+                yesterday_densities = download_json_from_drive(YESTERDAY_DENSITIES_FILE) or {}
+                # Calculate day before yesterday max densities
+                day_before_yesterday_max = {}
+                for camera_code in camera_mapping.values():
+                    max_density = 0.0
+                    densities_by_time = yesterday_densities.get('densities_by_time', {})
+                    for timestamp, cameras_data in densities_by_time.items():
+                        if camera_code in cameras_data:
+                            density = cameras_data[camera_code].get('density', 0.0)
+                            max_density = max(max_density, density)
+                    day_before_yesterday_max[camera_code] = max_density
+                upload_json_to_drive(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE, day_before_yesterday_max)
+                # Move today to yesterday
                 upload_json_to_drive(YESTERDAY_DENSITIES_FILE, today_densities)
+                # Calculate yesterday's max densities
+                yesterday_max_densities = {}
+                for camera_code in camera_mapping.values():
+                    max_density = 0.0
+                    densities_by_time = today_densities.get('densities_by_time', {})
+                    for timestamp, cameras_data in densities_by_time.items():
+                        if camera_code in cameras_data:
+                            density = cameras_data[camera_code].get('density', 0.0)
+                            max_density = max(max_density, density)
+                    yesterday_max_densities[camera_code] = max_density
+                upload_json_to_drive(YESTERDAY_MAX_DENSITIES_FILE, yesterday_max_densities)
+                # Update critical densities (all-time max)
                 update_critical_densities(today_densities)
+                # Reset today_densities for the new day
                 today_densities = {'date': today.strftime('%Y-%m-%d'), 'densities_by_time': {}}
                 upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
-                logger.info("Successfully transferred data to yesterday and reset today's data")
+                logger.info("Successfully transferred data and updated max densities")
         except Exception as e:
             logger.error(f"Error processing date change: {e}")
 
@@ -290,9 +308,10 @@ def update_critical_densities(densities_data):
 def manage_historical_densities():
     check_new_day()
     today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
-    if 'date' not in today_densities or today_densities['date'] != datetime.now().date().strftime('%Y-%m-%d'):
+    today_date_str = get_vietnam_time().date().strftime('%Y-%m-%d')
+    if 'date' not in today_densities or today_densities['date'] != today_date_str:
         today_densities = {
-            'date': datetime.now().date().strftime('%Y-%m-%d'),
+            'date': today_date_str,
             'densities_by_time': {}
         }
         upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
@@ -300,6 +319,14 @@ def manage_historical_densities():
     if not critical_densities:
         sample_critical_densities = {code: 80.0 for code in camera_mapping.values()}
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, sample_critical_densities)
+    yesterday_max_densities = download_json_from_drive(YESTERDAY_MAX_DENSITIES_FILE)
+    if not yesterday_max_densities:
+        sample_yesterday_max = {code: 0.0 for code in camera_mapping.values()}
+        upload_json_to_drive(YESTERDAY_MAX_DENSITIES_FILE, sample_yesterday_max)
+    day_before_yesterday_max = download_json_from_drive(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE)
+    if not day_before_yesterday_max:
+        sample_day_before_yesterday_max = {code: 0.0 for code in camera_mapping.values()}
+        upload_json_to_drive(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE, sample_day_before_yesterday_max)
     return today_densities
 
 def fetch_camera_image(camera_id):
@@ -395,10 +422,14 @@ def store_today_density(timestamp_str, camera_code, density_data):
 
 def fetch_and_process_densities():
     global last_density_update
-    timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    last_density_update = datetime.now()
+    vietnam_now = get_vietnam_time()
+    timestamp_str = vietnam_now.strftime('%Y-%m-%d %H:%M:%S')
+    last_density_update = vietnam_now
     results = {"timestamp": timestamp_str, "cameras": {}}
     success_count, failure_count = 0, 0
+    camera_densities = {}
+
+    # First pass: Collect densities for all cameras
     for camera_id, camera_name in cameras:
         try:
             logger.info(f"Processing camera {camera_name}")
@@ -406,27 +437,51 @@ def fetch_and_process_densities():
             image = fetch_camera_image(camera_id)
             if image is None:
                 failure_count += 1
-                logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
-                if _np:
-                    density = round(_np.random.uniform(10.0, 90.0), 1)
-                else:
-                    import random
-                    density = round(random.uniform(10.0, 90.0), 1)
+                logger.warning(f"Image fetch failed for {camera_name}")
+                density = None
             else:
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
                 analysis_result = analyze_image(image)
                 density = analysis_result["density"]
-            density_data = {"name": camera_name, "density": density, "timestamp": timestamp_str}
-            results["cameras"][camera_code] = density_data
-            store_today_density(timestamp_str, camera_code, density_data)
-            logger.info(f"Processed camera {camera_name}: density={density}")
+                camera_densities[camera_code] = density
         except Exception as e:
             logger.error(f"Error processing camera {camera_name}: {e}")
             failure_count += 1
-            density_data = {"name": camera_name, "density": 0.0, "timestamp": timestamp_str}
-            results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
-            store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
+            camera_densities[camera_code] = None
+
+    # Check for failure conditions: all densities are 100 or fetch failed for all cameras
+    all_failed = all(density is None for density in camera_densities.values())
+    all_max_density = all(density == 100.0 for density in camera_densities.values() if density is not None)
+
+    if all_failed or all_max_density:
+        logger.warning("Detected failure: All cameras failed or all densities are 100. Resetting today_densities.")
+        # Reset today_densities to continue collecting new data
+        today_densities = {
+            'date': get_vietnam_time().date().strftime('%Y-%m-%d'),
+            'densities_by_time': {}
+        }
+        upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
+        # Use default values (0.0) for this cycle
+        for camera_id, camera_name in cameras:
+            camera_code = camera_mapping.get(camera_name, camera_name)
+            density_data = {"name": camera_name, "density": 0.0, "timestamp": timestamp_str, "source": "default"}
+            results["cameras"][camera_code] = density_data
+            store_today_density(timestamp_str, camera_code, density_data)
+    else:
+        # Process normally if not all cameras failed
+        for camera_id, camera_name in cameras:
+            camera_code = camera_mapping.get(camera_name, camera_name)
+            density = camera_densities.get(camera_code)
+            if density is None:
+                logger.warning(f"Using default value for {camera_name} due to individual failure")
+                density_data = {"name": camera_name, "density": 0.0, "timestamp": timestamp_str, "source": "default"}
+            else:
+                density_data = {"name": camera_name, "density": density, "timestamp": timestamp_str, "source": "live"}
+            results["cameras"][camera_code] = density_data
+            store_today_density(timestamp_str, camera_code, density_data)
+            logger.info(f"Processed camera {camera_name}: density={density_data['density']}, source={density_data['source']}")
+
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(OUTPUT_JSON_FILE, results)
@@ -482,12 +537,12 @@ def start_worker():
 # Date transition worker for precise midnight updates
 def date_transition_worker():
     while True:
-        now = datetime.now()
-        midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+        now = get_vietnam_time()
+        midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=VIETNAM_TZ)
         seconds_until_midnight = (midnight - now).total_seconds()
         time.sleep(seconds_until_midnight + 1)
         check_new_day()
-        logger.info(f"Date transition completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Date transition completed at {get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # Initialize Google Drive and start workers
 if __name__ != "__main__":
@@ -513,7 +568,7 @@ def get_cameras():
     try:
         cameras_info = [{"code": chr(65 + idx), "id": camera_id, "name": camera_location, "url": camera_websites[idx] if idx < len(camera_websites) else None} for idx, (camera_id, camera_location) in enumerate(cameras)]
         return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'),
             "total_cameras": len(cameras_info),
             "cameras": cameras_info
         })
@@ -534,7 +589,7 @@ def get_live_densities():
         densities["update_interval"] = "30 seconds"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
-            time_until_next = next_update - datetime.now()
+            time_until_next = next_update - get_vietnam_time()
             densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(densities)
     except Exception as e:
@@ -568,6 +623,25 @@ def get_yesterday_densities():
         logger.error(f"Error reading yesterday's densities: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/yesterday-max-densities')
+def get_yesterday_max_densities():
+    try:
+        yesterday_max_densities = download_json_from_drive(YESTERDAY_MAX_DENSITIES_FILE)
+        if not yesterday_max_densities:
+            manage_historical_densities()
+            yesterday_max_densities = download_json_from_drive(YESTERDAY_MAX_DENSITIES_FILE)
+        day_before_yesterday_max = download_json_from_drive(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE) or {}
+        result = {
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'),
+            "description": "Maximum densities for each camera from yesterday and day before yesterday",
+            "yesterday_max_densities": yesterday_max_densities,
+            "day_before_yesterday_max_densities": day_before_yesterday_max
+        }
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error reading yesterday's max densities: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/critical-densities')
 def get_critical_densities():
     try:
@@ -576,7 +650,7 @@ def get_critical_densities():
             manage_historical_densities()
             critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
         result = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'),
             "description": "Critical density thresholds based on historical maximum values",
             "critical_densities": critical_densities
         }
@@ -607,7 +681,7 @@ def status():
         "using_models": USE_MODELS,
         "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
         "total_cameras": len(cameras),
-        "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        "time": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')
     })
 
 @app.route('/health')
@@ -615,6 +689,8 @@ def health_check():
     try:
         today_exists = bool(get_file_id(TODAY_DENSITIES_FILE))
         yesterday_exists = bool(get_file_id(YESTERDAY_DENSITIES_FILE))
+        day_before_yesterday_max_exists = bool(get_file_id(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE))
+        yesterday_max_exists = bool(get_file_id(YESTERDAY_MAX_DENSITIES_FILE))
         critical_exists = bool(get_file_id(CRITICAL_DENSITIES_FILE))
         output_exists = bool(get_file_id(OUTPUT_JSON_FILE))
         return jsonify({
@@ -624,12 +700,14 @@ def health_check():
                 "folder_id": FOLDER_ID,
                 "today_densities_exists": today_exists,
                 "yesterday_densities_exists": yesterday_exists,
+                "day_before_yesterday_max_densities_exists": day_before_yesterday_max_exists,
+                "yesterday_max_densities_exists": yesterday_max_exists,
                 "critical_densities_exists": critical_exists,
                 "output_file_exists": output_exists
             },
             "using_models": USE_MODELS,
             "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
-            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "time": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
         return jsonify({
@@ -674,6 +752,8 @@ def debug():
             "folder_id": FOLDER_ID,
             "today_densities_exists": bool(get_file_id(TODAY_DENSITIES_FILE)),
             "yesterday_densities_exists": bool(get_file_id(YESTERDAY_DENSITIES_FILE)),
+            "day_before_yesterday_max_densities_exists": bool(get_file_id(DAY_BEFORE_YESTERDAY_MAX_DENSITIES_FILE)),
+            "yesterday_max_densities_exists": bool(get_file_id(YESTERDAY_MAX_DENSITIES_FILE)),
             "critical_densities_exists": bool(get_file_id(CRITICAL_DENSITIES_FILE)),
             "output_json_exists": bool(get_file_id(OUTPUT_JSON_FILE))
         }
@@ -698,7 +778,7 @@ def debug():
         except Exception as e:
             memory_info = f"Error getting system resources: {str(e)}"
         return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'),
             "model_files": model_info,
             "model_load_status": model_load_status,
             "environment_variables": env_vars,
@@ -714,7 +794,7 @@ def debug():
         return jsonify({
             "error": "Debug information collection failed",
             "details": str(e),
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
 
 @app.route('/load-models')
@@ -731,7 +811,7 @@ def force_load_models():
                 "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))}
             },
             "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
-            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "time": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')
         }
         return jsonify(status)
     except Exception as e:
@@ -741,16 +821,16 @@ def force_load_models():
             "success": False,
             "error": str(e),
             "traceback": error_details,
-            "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "time": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
 
 @app.route('/debug-model')
 def debug_model():
     try:
         if not load_dependencies():
-            return jsonify({"error": "Dependencies not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+            return jsonify({"error": "Dependencies not loaded", "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}), 500
         if _road_model is None or _vehicle_model is None:
-            return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+            return jsonify({"error": "Models not loaded", "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}), 500
         road_sig = _road_model.signatures['serving_default'].structured_input_signature
         road_output_sig = _road_model.signatures['serving_default'].structured_outputs
         vehicle_sig = _vehicle_model.signatures['serving_default'].structured_input_signature
@@ -780,7 +860,7 @@ def debug_model():
         except Exception as e:
             vehicle_error = str(e)
         return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'),
             "models_loaded": {"road_model": _road_model is not None, "vehicle_model": _vehicle_model is not None},
             "model_signatures": {
                 "road_model": {"input_signature": str(road_sig), "output_signature": str(road_output_sig)},
@@ -789,14 +869,14 @@ def debug_model():
             "test_prediction": {"road_model": {"success": road_success, "error": road_error}, "vehicle_model": {"success": vehicle_success, "error": vehicle_error}}
         })
     except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        return jsonify({"error": str(e), "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}), 500
 
 @app.route('/camera-status')
 def check_camera_status():
     try:
-        results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
+        results = {"timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
         if not load_dependencies():
-            return jsonify({"error": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+            return jsonify({"error": "Failed to load dependencies", "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}), 500
         for camera_id, camera_name in cameras:
             camera_code = camera_mapping.get(camera_name, camera_name)
             try:
@@ -812,7 +892,7 @@ def check_camera_status():
                 results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": str(e)}
         return jsonify(results)
     except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        return jsonify({"error": str(e), "timestamp": get_vietnam_time().strftime('%Y-%m-%d %H:%M:%S')}), 500
 
 if __name__ == "__main__":
     init_google_drive()
