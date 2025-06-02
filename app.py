@@ -10,10 +10,16 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
+import cv2
+import numpy as np
+import tensorflow as tf
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
 
 # Initialize Flask
 app = Flask(__name__)
-#test
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -66,7 +72,6 @@ def get_file_id(filename):
 
 def upload_json_to_drive(filename, data):
     try:
-        # Convert data to JSON string and write to a temporary file
         temp_file = f"/tmp/{filename}"
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -75,14 +80,12 @@ def upload_json_to_drive(filename, data):
         media = MediaFileUpload(temp_file, mimetype='application/json')
         
         if file_id:
-            # Update existing file
             drive_service.files().update(
                 fileId=file_id,
                 media_body=media
             ).execute()
             logger.info(f"Updated {filename} in Google Drive")
         else:
-            # Create new file
             file_metadata = {
                 'name': filename,
                 'parents': [FOLDER_ID],
@@ -95,7 +98,6 @@ def upload_json_to_drive(filename, data):
             ).execute()
             logger.info(f"Uploaded {filename} to Google Drive")
         
-        # Clean up temporary file
         os.remove(temp_file)
     except Exception as e:
         logger.error(f"Error uploading {filename} to Google Drive: {e}")
@@ -170,13 +172,56 @@ def parse_camera_data():
 cameras, camera_mapping = parse_camera_data()
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
-# Lazy-load TensorFlow and other dependencies
-_tf, _cv2, _np, _requests, _road_model, _vehicle_model, _session = [None] * 7
+# Lazy-load dependencies
+_tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _session = [None] * 9
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
 last_density_update = None
+DEVICE = 'cpu'  # Default to CPU as per new model
+
+# Define MiniUNet architecture
+class MiniUNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1):
+        super(MiniUNet, self).__init__()
+        
+        self.enc1 = self.mini_block(in_channels, 16)
+        self.enc2 = self.mini_block(16, 32)
+        
+        self.bottleneck = self.mini_block(32, 64)
+        
+        self.upconv2 = nn.ConvTranspose2d(64, 32, 2, stride=2)
+        self.dec2 = self.mini_block(64, 32)
+        
+        self.upconv1 = nn.ConvTranspose2d(32, 16, 2, stride=2)
+        self.dec1 = self.mini_block(32, 16)
+        
+        self.final_conv = nn.Conv2d(16, out_channels, 1)
+        self.pool = nn.MaxPool2d(2)
+        
+    def mini_block(self, in_ch, out_ch):
+        return nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
+    
+    def forward(self, x):
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        
+        bottleneck = self.bottleneck(self.pool(enc2))
+        
+        dec2 = self.upconv2(bottleneck)
+        dec2 = torch.cat([dec2, enc2], dim=1)
+        dec2 = self.dec2(dec2)
+        
+        dec1 = self.upconv1(dec2)
+        dec1 = torch.cat([dec1, enc1], dim=1)
+        dec1 = self.dec1(dec1)
+        
+        return torch.sigmoid(self.final_conv(dec1))
 
 def load_dependencies():
-    global _tf, _cv2, _np, _requests, _session
+    global _tf, _cv2, _np, _requests, _torch, _transforms, _session
     if _tf is None:
         try:
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -186,7 +231,9 @@ def load_dependencies():
             import cv2
             import numpy as np
             import requests
-            _tf, _cv2, _np, _requests = tf, cv2, np, requests
+            import torch
+            import torchvision.transforms as transforms
+            _tf, _cv2, _np, _requests, _torch, _transforms = tf, cv2, np, requests, torch, transforms
             physical_devices = _tf.config.list_physical_devices('GPU')
             if physical_devices:
                 _tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -201,14 +248,6 @@ def load_dependencies():
             return False
     return True
 
-def dice_loss(y_true, y_pred, smooth=1e-6):
-    if not load_dependencies():
-        return 0
-    y_true_f = _tf.keras.backend.flatten(y_true)
-    y_pred_f = _tf.keras.backend.flatten(y_pred)
-    intersection = _tf.keras.backend.sum(y_true_f * y_pred_f)
-    return 1 - ((2. * intersection + smooth) / (_tf.keras.backend.sum(y_true_f) + _tf.keras.backend.sum(y_pred_f) + smooth))
-
 def load_models():
     global _road_model, _vehicle_model
     logger.info("=============================================")
@@ -218,17 +257,21 @@ def load_models():
         logger.error("Failed to load dependencies - cannot load models")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
-    road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
-    vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
+    vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
     logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, Vehicle: {os.path.exists(vehicle_model_path)}")
     try:
-        logger.info("Loading road segmentation model...")
-        _road_model = _tf.saved_model.load(road_model_path)
-        time.sleep(1)
-        logger.info("Loading vehicle detection model...")
-        _vehicle_model = _tf.saved_model.load(vehicle_model_path)
+        logger.info("Loading road segmentation model (TensorFlow)...")
+        _road_model = _tf.keras.models.load_model(road_model_path)
+        logger.info("Loading vehicle detection model (PyTorch)...")
+        _vehicle_model = MiniUNet(in_channels=3, out_channels=1).to(DEVICE)
+        checkpoint = _torch.load(vehicle_model_path, map_location=DEVICE)
+        _vehicle_model.load_state_dict(checkpoint['model_state_dict'])
+        _vehicle_model.eval()
         logger.info("=============================================")
         logger.info("MODELS LOADED SUCCESSFULLY")
+        logger.info(f"Vehicle model trained for {checkpoint.get('epoch', 'N/A')+1} epochs")
+        logger.info(f"Best validation IoU: {checkpoint.get('val_iou', 'N/A'):.3f}")
         logger.info("=============================================")
         return True
     except Exception as e:
@@ -242,16 +285,80 @@ def load_models():
 
 def preprocess_image(img):
     if not load_dependencies() or img is None:
-        return None
-    ycrcb = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
-    y, cr, cb = _cv2.split(ycrcb)
+        return None, None
+    # Preprocess for road model (TensorFlow)
+    img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
+    y, cr, cb = _cv2.split(img_road)
     clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
     y = clahe.apply(y)
     enhanced_img = _cv2.merge((y, cr, cb))
-    img = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
-    img = _cv2.resize(img, (128, 128))
-    img = img.astype('float32') / 255.0
-    return _np.expand_dims(img, axis=0)
+    img_road = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
+    img_road = _cv2.resize(img_road, (128, 128))
+    img_road = img_road.astype('float32') / 255.0
+    img_road = _np.expand_dims(img_road, axis=0)
+    
+    # Preprocess for vehicle model (PyTorch)
+    transform = _transforms.Compose([
+        _transforms.ToPILImage(),
+        _transforms.Resize((384, 384)),
+        _transforms.ToTensor(),
+    ])
+    img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
+    img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
+    
+    return img_road, img_vehicle
+
+def analyze_image(image):
+    if not load_dependencies() or image is None:
+        return {"density": 0.0}
+    try:
+        if _road_model is None or _vehicle_model is None:
+            logger.warning("Models not loaded, using fallback values")
+            return {"density": 0.0}
+        img_road, img_vehicle = preprocess_image(image)
+        if img_road is None or img_vehicle is None:
+            return {"density": 0.0}
+        
+        # Road segmentation (TensorFlow)
+        road_pred = _road_model.predict(img_road, verbose=0)
+        road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
+        road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
+        
+        # Road mask refinement
+        contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_contour = max(contours, key=_cv2.contourArea)
+            epsilon = 0.01 * _cv2.arcLength(largest_contour, True)
+            smoothed_contour = _cv2.approxPolyDP(largest_contour, epsilon, True)
+            hull = _cv2.convexHull(smoothed_contour)
+            refined_road_mask = _np.zeros_like(road_mask_resized, dtype=np.uint8)
+            _cv2.fillPoly(refined_road_mask, [hull], 255)
+        else:
+            refined_road_mask = road_mask_resized.copy()
+        road_pixels = _np.count_nonzero(refined_road_mask)
+        
+        # Vehicle detection (PyTorch)
+        with _torch.no_grad():
+            vehicle_pred = _vehicle_model(img_vehicle)
+        vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
+        vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
+        binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
+        
+        # Calculate density
+        road_binary = (refined_road_mask > 0).astype(np.uint8)
+        vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(np.uint8)
+        vehicle_pixels_on_road = _np.count_nonzero(vehicles_on_road)
+        
+        density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
+        density_percentage = round(max(0, min(100, density_percentage)), 1)
+        
+        logger.info(f"Calculated density: {density_percentage}%")
+        return {"density": density_percentage}
+    except Exception as e:
+        logger.error(f"Error analyzing image: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"density": 0.0}
 
 def check_new_day():
     today = datetime.now().date()
@@ -272,10 +379,10 @@ def check_new_day():
 def update_critical_densities(densities_data):
     try:
         critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE) or {}
-        densities_by_time = densities_data.get('densities_by_time', {})
+        density_by_time = densities_data.get('densities_by_time', {})
         for camera_code in camera_mapping.values():
             max_density = 0.0
-            for timestamp, cameras_data in densities_by_time.items():
+            for timestamp, cameras_data in density_by_time.items():
                 if camera_code in cameras_data:
                     density = cameras_data[camera_code].get('density', 0.0)
                     max_density = max(max_density, density)
@@ -283,9 +390,9 @@ def update_critical_densities(densities_data):
                 critical_densities[camera_code] = max_density
                 logger.info(f"Updated critical density for {camera_code}: {max_density}")
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
-        logger.info("Critical densities updated successfully")
+        logger.info("Critical density updated successfully")
     except Exception as e:
-        logger.error(f"Error updating critical densities: {e}")
+        logger.error(f"Error updating critical density: {e}")
 
 def manage_historical_densities():
     check_new_day()
@@ -343,45 +450,9 @@ def fetch_camera_image(camera_id):
         logger.error(f"Error fetching camera image for {camera_id}: {e}")
         return None
 
-def analyze_image(image):
-    if not load_dependencies() or image is None:
-        return {"density": 0.0}
-    try:
-        if _road_model is None or _vehicle_model is None:
-            logger.warning("Models not loaded, using fallback values")
-            return {"density": 0.0}
-        processed_image = preprocess_image(image)
-        if processed_image is None:
-            return {"density": 0.0}
-        input_tensor = _tf.convert_to_tensor(processed_image, dtype=_tf.float32)
-        try:
-            vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor=input_tensor)
-            vehicle_output = list(vehicle_prediction.values())[0]
-            vehicle_output_np = vehicle_output.numpy()
-            logger.info(f"Vehicle output shape: {vehicle_output_np.shape}")
-            if vehicle_output_np.shape[-1] == 12:
-                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]
-                weighted_sum = sum(float(_np.mean(vehicle_output_np[..., i])) * weights[i] for i in range(1, 12))
-                density = max(0, min(100, weighted_sum * 100))
-            else:
-                density = float(_np.mean(vehicle_output_np) * 100)
-            logger.info(f"Calculated weighted density: {density}")
-            return {"density": round(density, 1)}
-        except Exception as e:
-            logger.error(f"Error during model prediction: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            if _np:
-                density = round(_np.random.uniform(10.0, 90.0), 1)
-            else:
-                import random
-                density = round(random.uniform(10.0, 90.0), 1)
-            return {"density": density}
-    except Exception as e:
-        logger.error(f"Error analyzing image: {e}")
-        return {"density": 0.0}
+def storeබ
 
-def store_today_density(timestamp_str, camera_code, density_data):
+System: store_today_density(timestamp_str, camera_code, density_data):
     try:
         today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
         if 'densities_by_time' not in today_densities:
@@ -407,11 +478,7 @@ def fetch_and_process_densities():
             if image is None:
                 failure_count += 1
                 logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
-                if _np:
-                    density = round(_np.random.uniform(10.0, 90.0), 1)
-                else:
-                    import random
-                    density = round(random.uniform(10.0, 90.0), 1)
+                density = round(_np.random.uniform(10.0, 90.0), 1)
             else:
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
@@ -464,12 +531,12 @@ def start_worker():
             logger.error("Failed to load models! Check logs for details.")
             if not load_dependencies():
                 logger.error("Problem: Dependencies failed to load")
-            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf")):
+            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras")):
                 logger.error("Problem: Road model file not found")
-            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf")):
+            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth")):
                 logger.error("Problem: Vehicle model file not found")
             else:
-                logger.error("Problem: Unclear - check model format or TensorFlow compatibility")
+                logger.error("Problem: Unclear - check model format or compatibility")
         logger.info("Starting density worker thread...")
         density_thread = threading.Thread(target=density_worker, daemon=True)
         density_thread.start()
@@ -535,7 +602,7 @@ def get_live_densities():
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
-            densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+            density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(densities)
     except Exception as e:
         logger.error(f"Error reading live densities: {e}")
@@ -656,8 +723,8 @@ def refresh_densities():
 def debug():
     try:
         model_info = {
-            "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
-            "unet_multi_classV1_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))}
+            "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
+            "filtered_model_cpu": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
         }
         env_vars = {
             "USE_MODELS_RAW": os.environ.get('USE_MODELS', 'not set'),
@@ -684,7 +751,7 @@ def debug():
         model_load_status = {
             "road_model_loaded": _road_model is not None,
             "vehicle_model_loaded": _vehicle_model is not None,
-            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None
+            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None and _transforms is not None
         }
         try:
             import psutil
@@ -727,8 +794,8 @@ def force_load_models():
             "load_attempt_success": load_success,
             "models_loaded": {"road_model": road_loaded, "vehicle_model": vehicle_loaded},
             "model_files": {
-                "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
-                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))}
+                "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
+                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
             },
             "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -751,42 +818,30 @@ def debug_model():
             return jsonify({"error": "Dependencies not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         if _road_model is None or _vehicle_model is None:
             return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        road_sig = _road_model.signatures['serving_default'].structured_input_signature
-        road_output_sig = _road_model.signatures['serving_default'].structured_outputs
-        vehicle_sig = _vehicle_model.signatures['serving_default'].structured_input_signature
-        vehicle_output_sig = _vehicle_model.signatures['serving_default'].structured_outputs
-        test_input = _np.zeros((1, 128, 128, 3), dtype='float32')
-        tf_input = _tf.convert_to_tensor(test_input, dtype=_tf.float32)
-        road_success, vehicle_success = False, False
-        road_error, vehicle_error = None, None
+        # TensorFlow road model debug
+        road_success, road_error = False, None
         try:
-            if len(road_sig) > 1 and len(road_sig[1]) > 0:
-                input_name = list(road_sig[1].keys())[0]
-                inputs_dict = {input_name: tf_input}
-                _road_model.signatures['serving_default'](**inputs_dict)
-            else:
-                _road_model.signatures['serving_default'](tf_input)
+            test_input_tf = _np.zeros((1, 128, 128, 3), dtype='float32')
+            _road_model.predict(test_input_tf, verbose=0)
             road_success = True
         except Exception as e:
             road_error = str(e)
+        # PyTorch vehicle model debug
+        vehicle_success, vehicle_error = False, None
         try:
-            if len(vehicle_sig) > 1 and len(vehicle_sig[1]) > 0:
-                input_name = list(vehicle_sig[1].keys())[0]
-                inputs_dict = {input_name: tf_input}
-                _vehicle_model.signatures['serving_default'](**inputs_dict)
-            else:
-                _vehicle_model.signatures['serving_default'](tf_input)
+            test_input_torch = _torch.zeros((1, 3, 384, 384), dtype=_torch.float32).to(DEVICE)
+            with _torch.no_grad():
+                _vehicle_model(test_input_torch)
             vehicle_success = True
         except Exception as e:
             vehicle_error = str(e)
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "models_loaded": {"road_model": _road_model is not None, "vehicle_model": _vehicle_model is not None},
-            "model_signatures": {
-                "road_model": {"input_signature": str(road_sig), "output_signature": str(road_output_sig)},
-                "vehicle_model": {"input_signature": str(vehicle_sig), "output_signature": str(vehicle_output_sig)}
-            },
-            "test_prediction": {"road_model": {"success": road_success, "error": road_error}, "vehicle_model": {"success": vehicle_success, "error": vehicle_error}}
+            "test_prediction": {
+                "road_model": {"success": road_success, "error": road_error},
+                "vehicle_model": {"success": vehicle_success, "error": vehicle_error}
+            }
         })
     except Exception as e:
         return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
