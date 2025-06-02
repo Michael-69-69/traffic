@@ -16,6 +16,7 @@ import tensorflow as tf
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
+import requests
 
 # Initialize Flask
 app = Flask(__name__)
@@ -142,11 +143,11 @@ camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
 ]
 
 # Parse camera data from URLs
@@ -390,7 +391,7 @@ def update_critical_densities(densities_data):
                 critical_densities[camera_code] = max_density
                 logger.info(f"Updated critical density for {camera_code}: {max_density}")
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
-        logger.info("Critical density updated successfully")
+        logger.info("Critical densities updated successfully")
     except Exception as e:
         logger.error(f"Error updating critical density: {e}")
 
@@ -450,9 +451,7 @@ def fetch_camera_image(camera_id):
         logger.error(f"Error fetching camera image for {camera_id}: {e}")
         return None
 
-def storeබ
-
-System: store_today_density(timestamp_str, camera_code, density_data):
+def store_today_density(timestamp_str, camera_code, density_data):
     try:
         today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
         if 'densities_by_time' not in today_densities:
@@ -546,7 +545,6 @@ def start_worker():
         import traceback
         logger.error(traceback.format_exc())
 
-# Date transition worker for precise midnight updates
 def date_transition_worker():
     while True:
         now = datetime.now()
@@ -597,13 +595,13 @@ def get_live_densities():
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
-        densities["update_interval"] = "30 seconds"
+        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        density["update_interval"] = "30 seconds"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
             density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
-        return jsonify(densities)
+        return jsonify(density)  # Fixed variable name from 'densities' to 'density'
     except Exception as e:
         logger.error(f"Error reading live densities: {e}")
         return jsonify({"error": str(e)}), 500
@@ -659,7 +657,7 @@ def get_densities():
         if not densities:
             manage_historical_densities()
             densities = download_json_from_drive(OUTPUT_JSON_FILE)
-        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in densities["cameras"].items()}
+        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
         return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
