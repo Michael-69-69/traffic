@@ -10,3 +10,4 @@ google-api-python-client==2.170.0
 google-auth-oauthlib==1.2.2
 google-auth-httplib2==0.2.0
 pytz==2025.2
+torch==2.4.1
