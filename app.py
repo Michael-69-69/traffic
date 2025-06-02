@@ -123,17 +123,7 @@ def download_json_from_drive(filename):
         logger.error(f"Error downloading {filename} from Google Drive: {e}")
         return None
 
-# Base URL and default parameters for the camera feed
-main_url = "https://giaothong.hochiminhcity.gov.vn"
-base_url = "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx"
-default_params = {
-    "bg": "black",
-    "w": 300,
-    "h": 230
-}
-
-# Revert to the ORIGINAL working camera setup (same as density system)
-# Parse camera data from URLs - KEEP THE SAME STRUCTURE AS WORKING DENSITY
+# Camera setup - SAME AS WORKING DENSITY SYSTEM
 def parse_camera_data():
     camera_websites = [
         'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
@@ -212,7 +202,7 @@ def dice_loss(y_true, y_pred, smooth=1e-6):
     intersection = _tf.keras.backend.sum(y_true_f * y_pred_f)
     return 1 - ((2. * intersection + smooth) / (_tf.keras.backend.sum(y_true_f) + _tf.keras.backend.sum(y_pred_f) + smooth))
 
-# PyTorch MiniUNet Model Definition
+# PyTorch MiniUNet Model Definition (from your ML code)
 class MiniUNet:
     def __init__(self, in_channels=3, out_channels=1):
         if not load_dependencies():
@@ -280,7 +270,7 @@ class MiniUNet:
 def load_models():
     global _road_model, _vehicle_model, _pytorch_vehicle_model
     logger.info("=============================================")
-    logger.info("LOADING MODELS - FORCED ATTEMPT")
+    logger.info("LOADING MODELS - PYTORCH VEHICLE + TF ROAD")
     logger.info("=============================================")
     if not load_dependencies():
         logger.error("Failed to load dependencies - cannot load models")
@@ -288,21 +278,17 @@ def load_models():
     
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
     road_model_path = os.path.join(base_directory, "unet_road_segmentation_tf")
-    vehicle_model_path = os.path.join(base_directory, "unet_multi_classV1_tf")
     pytorch_vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
     
-    logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, Vehicle: {os.path.exists(vehicle_model_path)}, PyTorch Vehicle: {os.path.exists(pytorch_vehicle_model_path)}")
+    logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, PyTorch Vehicle: {os.path.exists(pytorch_vehicle_model_path)}")
     
     try:
-        # Load TensorFlow models
+        # Load TensorFlow road model (keep this for road segmentation)
         logger.info("Loading road segmentation model...")
         _road_model = _tf.saved_model.load(road_model_path)
         time.sleep(1)
         
-        logger.info("Loading vehicle detection model...")
-        _vehicle_model = _tf.saved_model.load(vehicle_model_path)
-        
-        # Load PyTorch vehicle model
+        # Load PyTorch vehicle model (replacing TensorFlow vehicle model)
         logger.info("Loading PyTorch vehicle counting model...")
         mini_unet = MiniUNet(in_channels=3, out_channels=1)
         model = mini_unet.model_class(in_channels=3, out_channels=1)
@@ -319,8 +305,9 @@ def load_models():
         }
         
         logger.info("=============================================")
-        logger.info("ALL MODELS LOADED SUCCESSFULLY")
+        logger.info("MODELS LOADED SUCCESSFULLY")
         logger.info(f"PyTorch model trained for {checkpoint['epoch']+1} epochs with IoU: {checkpoint.get('val_iou', 'N/A')}")
+        logger.info("NOW USING PYTORCH FOR BOTH DENSITY AND VEHICLE COUNTING")
         logger.info("=============================================")
         return True
     except Exception as e:
@@ -346,7 +333,7 @@ def preprocess_image(img):
     return _np.expand_dims(img, axis=0)
 
 def predict_vehicles_pytorch(image, img_size=384):
-    """Use PyTorch model to predict vehicle masks"""
+    """Use PyTorch model to predict vehicle masks (from your ML code)"""
     if not load_dependencies() or _pytorch_vehicle_model is None:
         return None
     
@@ -354,20 +341,20 @@ def predict_vehicles_pytorch(image, img_size=384):
         model = _pytorch_vehicle_model['model']
         transform = _pytorch_vehicle_model['transform']
         
-        # Convert BGR to RGB if needed
+        # Convert BGR to RGB if needed (from your ML code)
         if len(image.shape) == 3 and image.shape[2] == 3:
             image_rgb = _cv2.cvtColor(image, _cv2.COLOR_BGR2RGB)
         else:
             image_rgb = image
         
-        # Transform and add batch dimension
+        # Transform and add batch dimension (from your ML code)
         image_tensor = transform(image_rgb).unsqueeze(0)
         
-        # Make prediction
+        # Make prediction (from your ML code)
         with _torch.no_grad():
             vehicle_pred = model(image_tensor)
         
-        # Convert to numpy and resize to original image size
+        # Convert to numpy and resize to original image size (from your ML code)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
         
@@ -377,56 +364,204 @@ def predict_vehicles_pytorch(image, img_size=384):
         return None
 
 def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=500):
-    """Estimate vehicle count by analyzing blob size patterns"""
+    """Estimate vehicle count by analyzing blob size patterns (from your ML code)"""
     if not load_dependencies():
         return 0, 0
     
-    # Filter significant blobs
+    # Very aggressive noise filtering (from your ML code)
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
         return 0, 0
     
-    # Check if we only have large blobs
-    smallest_blob = min(significant_blobs)
-    
-    if smallest_blob > 1500:  # All blobs are large
-        logger.info("Only large blobs detected - using fixed vehicle size estimate")
-        unit_vehicle_size = 200
-    else:
-        # Find single vehicle size candidates
-        q25 = _np.percentile(significant_blobs, 25)
-        single_vehicle_candidates = [s for s in significant_blobs if s <= q25 * 1.2]
+    # Method 1: Find realistic single vehicle size with fallback logic (from your ML code)
+    def find_vehicle_unit_size(sizes):
+        """Find realistic single vehicle size by filtering out outliers"""
+        sizes = sorted(sizes)
+        
+        # Check if we only have large blobs (no small reference vehicles)
+        smallest_blob = min(sizes)
+        median_blob = _np.median(sizes)
+        
+        # If smallest blob is still quite large, we probably have no single vehicles
+        if smallest_blob > 1500:  # All blobs are large (likely multi-vehicle clusters)
+            logger.info("🔍 Only large blobs detected - using fixed vehicle size estimate")
+            return 200  # Smaller fallback for dense traffic where vehicles are compressed
+        
+        # Remove extreme outliers that could be noise or massive multi-vehicle clusters
+        q5, q95 = _np.percentile(sizes, [5, 95])  # Even more aggressive outlier removal
+        filtered_sizes = [s for s in sizes if q5 <= s <= q95]
+        
+        if not filtered_sizes:
+            filtered_sizes = sizes
+        
+        # Look for single vehicle candidates (smaller, more common sizes)
+        # Use 25th percentile as likely single vehicle size (more conservative)
+        single_vehicle_candidates = [s for s in filtered_sizes if s <= _np.percentile(filtered_sizes, 25)]
         
         if single_vehicle_candidates and min(single_vehicle_candidates) <= 1200:
-            unit_vehicle_size = _np.median(single_vehicle_candidates)
+            # We have some reasonably sized blobs that could be single vehicles
+            unit_size = _np.median(single_vehicle_candidates)
+            logger.info(f"🎯 Found small reference blobs - estimated unit size: {unit_size:.0f}px")
         else:
-            unit_vehicle_size = 200
+            # All blobs are large - use fixed estimate
+            logger.info("🔍 No small reference blobs found - using fixed vehicle size")
+            unit_size = 200  # Smaller fallback for dense traffic
         
-        # Ensure realistic bounds
-        unit_vehicle_size = max(500, min(unit_vehicle_size, 1800))
+        # Much stricter bounds for city security cameras
+        return max(500, min(unit_size, 1800))  # Single vehicle should be 500-1800 pixels
     
-    # Count vehicles conservatively
+    # Get the estimated single vehicle size
+    unit_vehicle_size = find_vehicle_unit_size(significant_blobs)
+    
+    # Count vehicles with very conservative rounding (from your ML code)
     total_vehicles = 0
     for blob_size in significant_blobs:
-        if blob_size < unit_vehicle_size * 1.2:
+        # Much more conservative vehicle counting
+        if blob_size < unit_vehicle_size * 1.2:  # Reduced threshold from 1.3 to 1.2
+            # Definitely single vehicle
             vehicles_in_blob = 1
         else:
-            vehicles_in_blob = max(1, int(blob_size / unit_vehicle_size))
+            # Multiple vehicles - but be very conservative
+            vehicles_in_blob = max(1, int(blob_size / unit_vehicle_size))  # Use int() for floor division
+        
         total_vehicles += vehicles_in_blob
     
     return int(total_vehicles), int(unit_vehicle_size)
 
+def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=500):
+    """Use statistical analysis to find vehicle count (from your ML code)"""
+    if not load_dependencies():
+        return 0, 0
+    
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    
+    if not significant_blobs:
+        return 0, 0
+    
+    # Convert to numpy for easier analysis
+    sizes = _np.array(significant_blobs)
+    
+    # Check if we only have large blobs
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1500:  # All blobs are large
+        logger.info("🔍 Statistical method: Only large blobs - using fixed 200px vehicle size")
+        avg_single_vehicle = 200
+        
+        # Count all blobs as multi-vehicle with fixed size
+        vehicle_count = 0
+        for blob_size in sizes:
+            vehicles_in_blob = max(1, int(blob_size / avg_single_vehicle))
+            vehicle_count += vehicles_in_blob
+            
+        return vehicle_count, int(avg_single_vehicle)
+    
+    # Normal statistical analysis when we have varied blob sizes
+    q20, q50, q80 = _np.percentile(sizes, [20, 50, 80])  # Use 20-80 range instead of 25-75
+    iqr = q80 - q20
+    
+    # Identify likely single vehicles (smaller, consistent sizes)
+    # Use stricter IQR method to find reasonable single vehicle range
+    single_vehicle_upper = q20 + 0.3 * iqr  # Much more conservative upper bound
+    
+    single_vehicle_blobs = sizes[sizes <= single_vehicle_upper]
+    multi_vehicle_blobs = sizes[sizes > single_vehicle_upper]
+    
+    # Estimate single vehicle size very conservatively
+    if len(single_vehicle_blobs) > 0:
+        avg_single_vehicle = _np.median(single_vehicle_blobs)
+    else:
+        # If no clear single vehicles, use very conservative estimate
+        avg_single_vehicle = max(200, q20)
+    
+    # Ensure stricter realistic vehicle size bounds
+    avg_single_vehicle = max(200, min(avg_single_vehicle, 1500))
+    
+    # Count vehicles very conservatively
+    vehicle_count = 0
+    
+    # Count single vehicle blobs
+    vehicle_count += len(single_vehicle_blobs)
+    
+    # Count multi-vehicle blobs very conservatively
+    for blob_size in multi_vehicle_blobs:
+        # Use floor division to be very conservative
+        vehicles_in_blob = max(1, int(blob_size / avg_single_vehicle))
+        vehicle_count += vehicles_in_blob
+    
+    return vehicle_count, int(avg_single_vehicle)
+
+def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=500):
+    """Find vehicle count using histogram peak analysis (from your ML code)"""
+    if not load_dependencies():
+        return 0, 0
+    
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    
+    if not significant_blobs:
+        return 0, 0
+    
+    sizes = _np.array(significant_blobs)
+    
+    # Check if we only have large blobs
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1500:  # All blobs are large
+        logger.info("🔍 Histogram method: Only large blobs - using fixed 200px vehicle size")
+        typical_vehicle_size = 200
+        
+        # Count all blobs as multi-vehicle with fixed size
+        total_vehicles = 0
+        for size in sizes:
+            vehicles_in_blob = max(1, int(size / typical_vehicle_size))
+            total_vehicles += vehicles_in_blob
+            
+        return int(total_vehicles), int(typical_vehicle_size)
+    
+    # Normal histogram analysis when we have varied blob sizes
+    if len(significant_blobs) >= 3:  # Reduced threshold from 5 to 3
+        n_bins = min(8, len(significant_blobs) // 2)  # Even fewer bins for robustness
+        hist, bin_edges = _np.histogram(sizes, bins=n_bins)
+        
+        # Find the most common blob size range (peak in histogram)
+        peak_bin_idx = _np.argmax(hist)
+        peak_range = (bin_edges[peak_bin_idx], bin_edges[peak_bin_idx + 1])
+        
+        # Blobs in the peak range are likely single vehicles
+        peak_sizes = sizes[(sizes >= peak_range[0]) & (sizes <= peak_range[1])]
+        
+        if len(peak_sizes) > 0:
+            typical_vehicle_size = _np.median(peak_sizes)
+        else:
+            # Fallback to very conservative estimate
+            typical_vehicle_size = _np.percentile(sizes, 20)  # Use 20th percentile instead of 25th
+    else:
+        # Too few blobs for histogram analysis
+        typical_vehicle_size = _np.median(sizes)
+    
+    # Ensure stricter realistic bounds
+    typical_vehicle_size = max(200, min(typical_vehicle_size, 1500))
+    
+    # Count total vehicles very conservatively
+    total_vehicles = 0
+    for size in sizes:
+        vehicles_in_blob = max(1, int(size / typical_vehicle_size))  # Use int() for conservative count
+        total_vehicles += vehicles_in_blob
+    
+    return int(total_vehicles), int(typical_vehicle_size)
+
 def analyze_traffic_with_vehicle_counting(image):
-    """Comprehensive traffic analysis including vehicle counting"""
+    """Comprehensive traffic analysis using PyTorch vehicle model (updated from your ML code)"""
     if not load_dependencies() or image is None:
         return {"density": 0.0, "vehicle_count": 0, "road_coverage": 0.0}
     
     try:
         result = {"density": 0.0, "vehicle_count": 0, "road_coverage": 0.0, "blob_info": []}
         
-        # Step 1: Road Segmentation (if road model is available)
+        # Step 1: Road Segmentation (TensorFlow) - Keep this for road area calculation
         road_pixels = 0
+        road_mask_resized = None
         if _road_model is not None:
             try:
                 processed_image = preprocess_image(image)
@@ -436,100 +571,166 @@ def analyze_traffic_with_vehicle_counting(image):
                     road_output = list(road_prediction.values())[0]
                     road_mask = (road_output.numpy().squeeze() > 0.5).astype(_np.uint8)
                     road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
+                    
+                    # Road mask refinement (from your ML code)
+                    contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        largest_contour = max(contours, key=_cv2.contourArea)
+                        epsilon = 0.01 * _cv2.arcLength(largest_contour, True)
+                        smoothed_contour = _cv2.approxPolyDP(largest_contour, epsilon, True)
+                        hull = _cv2.convexHull(smoothed_contour)
+                        refined_road_mask = _np.zeros_like(road_mask_resized, dtype=_np.uint8)
+                        _cv2.fillPoly(refined_road_mask, [hull], 255)
+                        road_mask_resized = refined_road_mask
+                    
                     road_pixels = _np.count_nonzero(road_mask_resized)
             except Exception as e:
                 logger.error(f"Error in road segmentation: {e}")
-                road_mask_resized = _np.ones((image.shape[0], image.shape[1]), dtype=_np.uint8)
-                road_pixels = image.shape[0] * image.shape[1]
-        else:
-            # Fallback: assume entire image is road
+        
+        # Fallback: assume entire image is road if road model fails
+        if road_mask_resized is None:
             road_mask_resized = _np.ones((image.shape[0], image.shape[1]), dtype=_np.uint8)
             road_pixels = image.shape[0] * image.shape[1]
         
-        # Step 2: Vehicle Detection with PyTorch
+        # Step 2: Vehicle Detection with PyTorch (from your ML code)
         vehicle_count = 0
+        density_percentage = 0.0
         if _pytorch_vehicle_model is not None:
             try:
+                # Use PyTorch model to predict vehicle masks
                 vehicle_mask = predict_vehicles_pytorch(image)
                 if vehicle_mask is not None:
-                    # Apply threshold
+                    # Apply threshold (from your ML code)
                     vehicle_threshold = 0.25
                     binary_vehicle_mask = (vehicle_mask > vehicle_threshold).astype(_np.uint8)
                     
-                    # Find vehicles on road
-                    vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_mask_resized).astype(_np.uint8)
+                    # Find vehicles on road (from your ML code)
+                    road_binary = (road_mask_resized > 0).astype(_np.uint8)
+                    vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(_np.uint8)
                     
-                    # Clean up mask with morphological operations
+                    # Morphological operations for noise cleaning (from your ML code)
                     kernel_open = _np.ones((2, 2), _np.uint8)
                     kernel_close = _np.ones((5, 5), _np.uint8)
                     vehicles_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, kernel_open, iterations=1)
                     vehicles_cleaned = _cv2.morphologyEx(vehicles_cleaned, _cv2.MORPH_CLOSE, kernel_close, iterations=1)
                     
-                    # Connected components analysis
+                    # Connected components analysis (from your ML code)
                     num_labels, labels, stats, centroids = _cv2.connectedComponentsWithStats(
                         vehicles_cleaned, connectivity=8
                     )
                     
-                    # Extract blob sizes
+                    # Extract blob sizes with filtering (from your ML code)
                     blob_sizes = []
                     blob_info = []
-                    min_blob_size = 500
-                    max_blob_size = 8000
+                    min_reasonable_blob = 500
+                    max_reasonable_blob = 8000
                     
                     for i in range(1, num_labels):  # Skip background
                         blob_size = stats[i, _cv2.CC_STAT_AREA]
-                        if min_blob_size <= blob_size <= max_blob_size:
+                        if min_reasonable_blob <= blob_size <= max_reasonable_blob:
                             blob_sizes.append(blob_size)
                             blob_info.append({
                                 'size': blob_size,
                                 'center': [float(centroids[i][0]), float(centroids[i][1])]
                             })
                     
-                    # Estimate vehicle count
+                    # Vehicle counting using your algorithmic approach
                     if blob_sizes:
-                        vehicle_count, avg_vehicle_size = estimate_vehicle_count_from_blobs(blob_sizes)
-                        result["blob_info"] = blob_info
+                        # Use the most conservative estimate (from your ML code)
+                        method1_count, method1_unit = estimate_vehicle_count_from_blobs(blob_sizes)
+                        method2_count, method2_unit = estimate_vehicles_statistical_clustering(blob_sizes)
+                        method3_count, method3_unit = estimate_vehicles_histogram_analysis(blob_sizes)
+                        
+                        all_counts = [method1_count, method2_count, method3_count]
+                        vehicle_count = min(all_counts)  # Most conservative estimate
+                        
+                        # Get corresponding unit size
+                        if vehicle_count == method1_count:
+                            avg_vehicle_size = method1_unit
+                        elif vehicle_count == method2_count:
+                            avg_vehicle_size = method2_unit
+                        else:
+                            avg_vehicle_size = method3_unit
+                        
                         result["avg_vehicle_size"] = avg_vehicle_size
                     
-                    # Calculate road coverage
+                    # Calculate density and road coverage (from your ML code)
                     vehicle_pixels_on_road = _np.count_nonzero(vehicles_on_road)
+                    total_vehicle_pixels = _np.count_nonzero(binary_vehicle_mask)
+                    
                     if road_pixels > 0:
                         road_coverage = (vehicle_pixels_on_road / road_pixels) * 100
+                        # Convert road coverage to density using similar logic as your TensorFlow model
+                        density_percentage = min(100.0, road_coverage * 4.0)  # Scale factor
                     else:
                         road_coverage = 0
+                        density_percentage = 0
                     
                     result["road_coverage"] = round(road_coverage, 2)
+                    result["blob_info"] = blob_info
+                    result["total_vehicle_pixels"] = total_vehicle_pixels
+                    result["vehicle_pixels_on_road"] = vehicle_pixels_on_road
                     
             except Exception as e:
-                logger.error(f"Error in vehicle counting: {e}")
-        
-        # Step 3: Density calculation (existing logic)
-        if _vehicle_model is not None:
-            try:
-                processed_image = preprocess_image(image)
-                if processed_image is not None:
-                    input_tensor = _tf.convert_to_tensor(processed_image, dtype=_tf.float32)
-                    vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor=input_tensor)
-                    vehicle_output = list(vehicle_prediction.values())[0]
-                    vehicle_output_np = vehicle_output.numpy()
-                    
-                    if vehicle_output_np.shape[-1] == 12:
-                        weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]
-                        weighted_sum = sum(float(_np.mean(vehicle_output_np[..., i])) * weights[i] for i in range(1, 12))
-                        density = max(0, min(100, weighted_sum * 100))
-                    else:
-                        density = float(_np.mean(vehicle_output_np) * 100)
-                    
-                    result["density"] = round(density, 1)
-            except Exception as e:
-                logger.error(f"Error in density calculation: {e}")
+                logger.error(f"Error in PyTorch vehicle counting: {e}")
         
         result["vehicle_count"] = vehicle_count
+        result["density"] = round(density_percentage, 1)
+        result["road_pixels"] = road_pixels
+        
         return result
         
     except Exception as e:
         logger.error(f"Error in comprehensive traffic analysis: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {"density": 0.0, "vehicle_count": 0, "road_coverage": 0.0}
+
+def analyze_image(image):
+    """Updated to use PyTorch vehicle model for density calculation instead of TensorFlow"""
+    if not load_dependencies() or image is None:
+        return {"density": 0.0}
+    try:
+        if _pytorch_vehicle_model is None:
+            logger.warning("PyTorch vehicle model not loaded, using fallback values")
+            return {"density": 0.0}
+        
+        # Use the same comprehensive analysis as vehicle counting
+        analysis_result = analyze_traffic_with_vehicle_counting(image)
+        
+        # Extract density from the comprehensive analysis
+        density = analysis_result.get("density", 0.0)
+        
+        # If we don't have density from road coverage, calculate from vehicle pixels
+        if density == 0.0:
+            road_coverage = analysis_result.get("road_coverage", 0.0)
+            vehicle_count = analysis_result.get("vehicle_count", 0)
+            
+            # Convert road coverage and vehicle count to density percentage
+            # Use similar logic as the original weighted system
+            if road_coverage > 0:
+                # Base density on road coverage percentage
+                density = min(100.0, road_coverage * 3.5)  # Scale road coverage to density
+            elif vehicle_count > 0:
+                # Fallback: estimate density from vehicle count
+                density = min(100.0, vehicle_count * 7.5)  # Scale vehicle count to density
+            else:
+                density = 0.0
+        
+        logger.info(f"PyTorch density calculation: {density}")
+        return {"density": round(density, 1)}
+        
+    except Exception as e:
+        logger.error(f"Error in PyTorch density analysis: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Fallback with random values (same as before)
+        if _np:
+            density = round(_np.random.uniform(10.0, 90.0), 1)
+        else:
+            import random
+            density = round(random.uniform(10.0, 90.0), 1)
+        return {"density": density}
 
 def check_new_day():
     today = datetime.now().date()
@@ -621,44 +822,6 @@ def fetch_camera_image(camera_id):
     except Exception as e:
         logger.error(f"Error fetching camera image for {camera_id}: {e}")
         return None
-
-def analyze_image(image):
-    if not load_dependencies() or image is None:
-        return {"density": 0.0}
-    try:
-        if _road_model is None or _vehicle_model is None:
-            logger.warning("Models not loaded, using fallback values")
-            return {"density": 0.0}
-        processed_image = preprocess_image(image)
-        if processed_image is None:
-            return {"density": 0.0}
-        input_tensor = _tf.convert_to_tensor(processed_image, dtype=_tf.float32)
-        try:
-            vehicle_prediction = _vehicle_model.signatures['serving_default'](input_tensor=input_tensor)
-            vehicle_output = list(vehicle_prediction.values())[0]
-            vehicle_output_np = vehicle_output.numpy()
-            logger.info(f"Vehicle output shape: {vehicle_output_np.shape}")
-            if vehicle_output_np.shape[-1] == 12:
-                weights = [0.0, 1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.05]
-                weighted_sum = sum(float(_np.mean(vehicle_output_np[..., i])) * weights[i] for i in range(1, 12))
-                density = max(0, min(100, weighted_sum * 100))
-            else:
-                density = float(_np.mean(vehicle_output_np) * 100)
-            logger.info(f"Calculated weighted density: {density}")
-            return {"density": round(density, 1)}
-        except Exception as e:
-            logger.error(f"Error during model prediction: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            if _np:
-                density = round(_np.random.uniform(10.0, 90.0), 1)
-            else:
-                import random
-                density = round(random.uniform(10.0, 90.0), 1)
-            return {"density": density}
-    except Exception as e:
-        logger.error(f"Error analyzing image: {e}")
-        return {"density": 0.0}
 
 def store_today_density(timestamp_str, camera_code, density_data):
     try:
@@ -849,7 +1012,7 @@ def density_worker():
 
 def start_worker():
     try:
-        logger.info("Starting worker - FOCUSING ON MODEL LOADING")
+        logger.info("Starting worker - FOCUSING ON PYTORCH VEHICLE MODEL LOADING")
         logger.info("Attempting to load models (forced)...")
         load_success = load_models()
         if load_success:
@@ -860,8 +1023,6 @@ def start_worker():
                 logger.error("Problem: Dependencies failed to load")
             elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf")):
                 logger.error("Problem: Road model file not found")
-            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf")):
-                logger.error("Problem: Vehicle model file not found")
             elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth")):
                 logger.error("Problem: PyTorch vehicle model file not found")
             else:
@@ -900,12 +1061,13 @@ if __name__ != "__main__":
 def index():
     return jsonify({
         "status": "running",
-        "version": "2.0",
-        "message": "Traffic Analysis Service with Vehicle Counting is operational",
+        "version": "3.0",
+        "message": "Traffic Analysis Service with PyTorch Vehicle Counting is operational",
         "using_models": USE_MODELS,
         "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
         "last_vehicle_count_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None,
-        "features": ["density_analysis", "vehicle_counting", "road_segmentation"]
+        "features": ["pytorch_density_analysis", "pytorch_vehicle_counting", "tensorflow_road_segmentation"],
+        "note": "Now using PyTorch filtered_model_cpu.pth for both density and vehicle counting"
     })
 
 @app.route('/cameras')
@@ -923,7 +1085,7 @@ def get_cameras():
 
 @app.route('/count_vehicles')
 def count_vehicles():
-    """NEW ROUTE: Count vehicles across all cameras"""
+    """NEW ROUTE: Count vehicles across all cameras using PyTorch model"""
     try:
         logger.info("Vehicle counting requested via /count_vehicles endpoint")
         results = fetch_and_process_vehicle_counts()
@@ -931,7 +1093,7 @@ def count_vehicles():
         # Format response for easy consumption
         response = {
             "timestamp": results["timestamp"],
-            "message": "Vehicle counting completed successfully",
+            "message": "Vehicle counting completed successfully using PyTorch model",
             "summary": results["summary"],
             "cameras": {}
         }
@@ -951,6 +1113,7 @@ def count_vehicles():
         
         response["formatted_counts"] = "; ".join(formatted_counts)
         response["simple_format"] = results.get("simple_counts", {})
+        response["model_info"] = "Using PyTorch filtered_model_cpu.pth for vehicle detection and counting"
         
         return jsonify(response)
         
@@ -991,6 +1154,7 @@ def get_live_densities():
             }), 404
         densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         densities["update_interval"] = "30 seconds"
+        densities["model_info"] = "Using PyTorch filtered_model_cpu.pth for density calculation"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
@@ -1062,16 +1226,16 @@ def status():
     return jsonify({
         "status": "running",
         "memory_optimized": True,
-        "version": "2.0",
+        "version": "3.0",
         "using_models": USE_MODELS,
         "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
         "last_vehicle_count_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None,
         "total_cameras": len(cameras),
-        "features": ["density_analysis", "vehicle_counting", "road_segmentation"],
+        "features": ["pytorch_density_analysis", "pytorch_vehicle_counting", "tensorflow_road_segmentation"],
         "models_loaded": {
             "tensorflow_road": _road_model is not None,
-            "tensorflow_vehicle": _vehicle_model is not None,
-            "pytorch_vehicle": _pytorch_vehicle_model is not None
+            "pytorch_vehicle": _pytorch_vehicle_model is not None,
+            "note": "Using PyTorch for both density and vehicle counting"
         },
         "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
@@ -1098,6 +1262,7 @@ def health_check():
             "using_models": USE_MODELS,
             "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
             "last_vehicle_count_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None,
+            "model_info": "PyTorch filtered_model_cpu.pth for density and vehicle counting",
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
@@ -1112,7 +1277,7 @@ def refresh_densities():
         result = fetch_and_process_densities()
         return jsonify({
             "status": "success",
-            "message": "Densities refreshed successfully",
+            "message": "Densities refreshed successfully using PyTorch model",
             "timestamp": result["timestamp"]
         })
     except Exception as e:
@@ -1128,7 +1293,7 @@ def refresh_vehicle_counts():
         result = fetch_and_process_vehicle_counts()
         return jsonify({
             "status": "success",
-            "message": "Vehicle counts refreshed successfully",
+            "message": "Vehicle counts refreshed successfully using PyTorch model",
             "timestamp": result["timestamp"],
             "summary": result["summary"],
             "formatted_counts": "; ".join([f"{code}: {data['vehicle_count']}" for code, data in sorted(result["cameras"].items())])
@@ -1144,7 +1309,6 @@ def debug():
     try:
         model_info = {
             "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
-            "unet_multi_classV1_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))},
             "filtered_model_cpu.pth": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
         }
         env_vars = {
@@ -1172,9 +1336,9 @@ def debug():
             files_in_base_dir = f"Error listing files: {str(e)}"
         model_load_status = {
             "road_model_loaded": _road_model is not None,
-            "vehicle_model_loaded": _vehicle_model is not None,
             "pytorch_vehicle_model_loaded": _pytorch_vehicle_model is not None,
-            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None
+            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None,
+            "note": "Using PyTorch for both density and vehicle counting"
         }
         try:
             import psutil
@@ -1213,21 +1377,19 @@ def force_load_models():
     try:
         load_success = load_models()
         road_loaded = _road_model is not None
-        vehicle_loaded = _vehicle_model is not None
         pytorch_loaded = _pytorch_vehicle_model is not None
         status = {
             "load_attempt_success": load_success,
             "models_loaded": {
-                "road_model": road_loaded, 
-                "vehicle_model": vehicle_loaded,
+                "road_model": road_loaded,
                 "pytorch_vehicle_model": pytorch_loaded
             },
             "model_files": {
                 "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation_tf"))},
-                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_multi_classV1_tf"))},
                 "pytorch_vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
             },
             "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
+            "note": "Using PyTorch for both density and vehicle counting",
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
@@ -1256,27 +1418,24 @@ def debug_model():
         
         model_status = {
             "tensorflow_models": {
-                "road_loaded": _road_model is not None,
-                "vehicle_loaded": _vehicle_model is not None
+                "road_loaded": _road_model is not None
             },
             "pytorch_model": {
                 "loaded": _pytorch_vehicle_model is not None
             }
         }
         
-        # Test TensorFlow models if loaded
-        if _road_model is not None and _vehicle_model is not None:
+        # Test TensorFlow road model if loaded
+        if _road_model is not None:
             try:
                 road_sig = _road_model.signatures['serving_default'].structured_input_signature
                 road_output_sig = _road_model.signatures['serving_default'].structured_outputs
-                vehicle_sig = _vehicle_model.signatures['serving_default'].structured_input_signature
-                vehicle_output_sig = _vehicle_model.signatures['serving_default'].structured_outputs
                 
                 test_input = _np.zeros((1, 128, 128, 3), dtype='float32')
                 tf_input = _tf.convert_to_tensor(test_input, dtype=_tf.float32)
                 
-                road_success, vehicle_success = False, False
-                road_error, vehicle_error = None, None
+                road_success = False
+                road_error = None
                 
                 try:
                     if len(road_sig) > 1 and len(road_sig[1]) > 0:
@@ -1289,24 +1448,10 @@ def debug_model():
                 except Exception as e:
                     road_error = str(e)
                 
-                try:
-                    if len(vehicle_sig) > 1 and len(vehicle_sig[1]) > 0:
-                        input_name = list(vehicle_sig[1].keys())[0]
-                        inputs_dict = {input_name: tf_input}
-                        _vehicle_model.signatures['serving_default'](**inputs_dict)
-                    else:
-                        _vehicle_model.signatures['serving_default'](tf_input)
-                    vehicle_success = True
-                except Exception as e:
-                    vehicle_error = str(e)
-                
                 model_status["tensorflow_models"].update({
                     "road_signature": str(road_sig),
-                    "vehicle_signature": str(vehicle_sig),
                     "road_test_success": road_success,
-                    "vehicle_test_success": vehicle_success,
-                    "road_error": road_error,
-                    "vehicle_error": vehicle_error
+                    "road_error": road_error
                 })
             except Exception as e:
                 model_status["tensorflow_models"]["error"] = str(e)
@@ -1338,7 +1483,8 @@ def debug_model():
         
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "model_status": model_status
+            "model_status": model_status,
+            "note": "Using PyTorch for both density and vehicle counting"
         })
     except Exception as e:
         return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
@@ -1402,7 +1548,8 @@ def test_single_camera_vehicle_count(camera_code):
             "avg_vehicle_size": result.get("avg_vehicle_size", 0),
             "image_size": f"{image.shape[1]}x{image.shape[0]}",
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "status": "success"
+            "status": "success",
+            "model_used": "PyTorch filtered_model_cpu.pth"
         }
         
         return jsonify(response)
