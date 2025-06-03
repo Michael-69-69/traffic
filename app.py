@@ -595,13 +595,14 @@ def get_live_densities():
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
-        density["update_interval"] = "30 seconds"
+        # Fix: Change 'density' to 'densities'
+        densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        densities["update_interval"] = "30 seconds"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
-            density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
-        return jsonify(density)  # Fixed variable name from 'densities' to 'density'
+            densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+        return jsonify(densities)  # This was already correct
     except Exception as e:
         logger.error(f"Error reading live densities: {e}")
         return jsonify({"error": str(e)}), 500
@@ -657,7 +658,8 @@ def get_densities():
         if not densities:
             manage_historical_densities()
             densities = download_json_from_drive(OUTPUT_JSON_FILE)
-        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
+        # Fix: Change 'density' to 'densities'
+        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in densities["cameras"].items()}
         return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
