@@ -32,11 +32,12 @@ CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET')
 REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
 FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 
-# File names for density data
+# File names for density and vehicle count data
 TODAY_DENSITIES_FILE = "today_densities.json"
 YESTERDAY_DENSITIES_FILE = "yesterday_densities.json"
 CRITICAL_DENSITIES_FILE = "critical_densities.json"
 OUTPUT_JSON_FILE = "densities.json"
+VEHICLE_COUNTS_FILE = "vehicle_counts.json"
 
 # Initialize Google Drive service
 drive_service = None
@@ -173,11 +174,142 @@ def parse_camera_data():
 cameras, camera_mapping = parse_camera_data()
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
+# Vehicle counting functions from standalone script
+def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
+    """Estimate vehicle count by analyzing blob size patterns with adaptive logic for large-only blobs"""
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    
+    if not significant_blobs:
+        return 0, 0
+    
+    def find_vehicle_unit_size(sizes):
+        sizes = sorted(sizes)
+        smallest_blob = min(sizes)
+        median_blob = np.median(sizes)
+        
+        if smallest_blob > 1000:
+            logger.info("Only large blobs detected - using fixed vehicle size estimate")
+            return 150
+        
+        q5, q95 = np.percentile(sizes, [5, 95])
+        filtered_sizes = [s for s in sizes if q5 <= s <= q95]
+        
+        if not filtered_sizes:
+            filtered_sizes = sizes
+        
+        single_vehicle_candidates = [s for s in filtered_sizes if s <= np.percentile(filtered_sizes, 25)]
+        
+        if single_vehicle_candidates and min(single_vehicle_candidates) <= 800:
+            unit_size = np.median(single_vehicle_candidates)
+            logger.info(f"Found small reference blobs - estimated unit size: {unit_size:.0f}px")
+        else:
+            logger.info("No small reference blobs found - using fixed vehicle size")
+            unit_size = 150
+        
+        return max(300, min(unit_size, 1200))
+    
+    unit_vehicle_size = find_vehicle_unit_size(significant_blobs)
+    
+    total_vehicles = 0
+    for blob_size in significant_blobs:
+        if blob_size < unit_vehicle_size * 1.2:
+            vehicles_in_blob = 1
+        else:
+            vehicles_in_blob = max(1, int(blob_size / unit_vehicle_size))
+        total_vehicles += vehicles_in_blob
+    
+    return int(total_vehicles), int(unit_vehicle_size)
+
+def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
+    """Use statistical analysis to find vehicle count with adaptive logic for large-only blobs"""
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    
+    if not significant_blobs:
+        return 0, 0
+    
+    sizes = np.array(significant_blobs)
+    
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1000:
+        logger.info("Statistical method: Only large blobs - using fixed 150px vehicle size")
+        avg_single_vehicle = 150
+        vehicle_count = 0
+        for blob_size in sizes:
+            vehicles_in_blob = max(1, int(blob_size / avg_single_vehicle))
+            vehicle_count += vehicles_in_blob
+        return vehicle_count, int(avg_single_vehicle)
+    
+    q20, q50, q80 = np.percentile(sizes, [20, 50, 80])
+    iqr = q80 - q20
+    
+    single_vehicle_upper = q20 + 0.3 * iqr
+    
+    single_vehicle_blobs = sizes[sizes <= single_vehicle_upper]
+    multi_vehicle_blobs = sizes[sizes > single_vehicle_upper]
+    
+    if len(single_vehicle_blobs) > 0:
+        avg_single_vehicle = np.median(single_vehicle_blobs)
+    else:
+        avg_single_vehicle = max(150, q20)
+    
+    avg_single_vehicle = max(150, min(avg_single_vehicle, 1000))
+    
+    vehicle_count = len(single_vehicle_blobs)
+    for blob_size in multi_vehicle_blobs:
+        vehicles_in_blob = max(1, int(blob_size / avg_single_vehicle))
+        vehicle_count += vehicles_in_blob
+    
+    return vehicle_count, int(avg_single_vehicle)
+
+def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
+    """Find vehicle count using histogram peak analysis with adaptive logic for large-only blobs"""
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    
+    if not significant_blobs:
+        return 0, 0
+    
+    sizes = np.array(significant_blobs)
+    
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1000:
+        logger.info("Histogram method: Only large blobs - using fixed 150px vehicle size")
+        typical_vehicle_size = 150
+        total_vehicles = 0
+        for size in sizes:
+            vehicles_in_blob = max(1, int(size / typical_vehicle_size))
+            total_vehicles += vehicles_in_blob
+        return int(total_vehicles), int(typical_vehicle_size)
+    
+    if len(significant_blobs) >= 3:
+        n_bins = min(8, len(significant_blobs) // 2)
+        hist, bin_edges = np.histogram(sizes, bins=n_bins)
+        peak_bin_idx = np.argmax(hist)
+        peak_range = (bin_edges[peak_bin_idx], bin_edges[peak_bin_idx + 1])
+        peak_sizes = sizes[(sizes >= peak_range[0]) & (sizes <= peak_range[1])]
+        
+        if len(peak_sizes) > 0:
+            typical_vehicle_size = np.median(peak_sizes)
+        else:
+            typical_vehicle_size = np.percentile(sizes, 20)
+    else:
+        typical_vehicle_size = np.median(sizes)
+    
+    typical_vehicle_size = max(150, min(typical_vehicle_size, 1000))
+    
+    total_vehicles = 0
+    for size in sizes:
+        vehicles_in_blob = max(1, int(size / typical_vehicle_size))
+        total_vehicles += vehicles_in_blob
+    
+    return int(total_vehicles), int(typical_vehicle_size)
+
 # Lazy-load dependencies
 _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _session = [None] * 9
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
 last_density_update = None
-DEVICE = 'cpu'  # Default to CPU as per new model
+DEVICE = 'cpu'
 
 # Define MiniUNet architecture
 class MiniUNet(nn.Module):
@@ -287,7 +419,6 @@ def load_models():
 def preprocess_image(img):
     if not load_dependencies() or img is None:
         return None, None
-    # Preprocess for road model (TensorFlow)
     img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
     y, cr, cb = _cv2.split(img_road)
     clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
@@ -298,7 +429,6 @@ def preprocess_image(img):
     img_road = img_road.astype('float32') / 255.0
     img_road = _np.expand_dims(img_road, axis=0)
     
-    # Preprocess for vehicle model (PyTorch)
     transform = _transforms.Compose([
         _transforms.ToPILImage(),
         _transforms.Resize((384, 384)),
@@ -311,21 +441,20 @@ def preprocess_image(img):
 
 def analyze_image(image):
     if not load_dependencies() or image is None:
-        return {"density": 0.0}
+        return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
     try:
         if _road_model is None or _vehicle_model is None:
             logger.warning("Models not loaded, using fallback values")
-            return {"density": 0.0}
+            return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
         img_road, img_vehicle = preprocess_image(image)
         if img_road is None or img_vehicle is None:
-            return {"density": 0.0}
+            return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
         
-        # Road segmentation (TensorFlow)
+        # Road segmentation
         road_pred = _road_model.predict(img_road, verbose=0)
         road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
         road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
         
-        # Road mask refinement
         contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
         if contours:
             largest_contour = max(contours, key=_cv2.contourArea)
@@ -338,7 +467,7 @@ def analyze_image(image):
             refined_road_mask = road_mask_resized.copy()
         road_pixels = _np.count_nonzero(refined_road_mask)
         
-        # Vehicle detection (PyTorch)
+        # Vehicle detection
         with _torch.no_grad():
             vehicle_pred = _vehicle_model(img_vehicle)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
@@ -353,13 +482,42 @@ def analyze_image(image):
         density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
         density_percentage = round(max(0, min(100, density_percentage)), 1)
         
-        logger.info(f"Calculated density: {density_percentage}%")
-        return {"density": density_percentage}
+        # Vehicle counting
+        kernel_open = _np.ones((2, 2), np.uint8)
+        kernel_close = _np.ones((5, 5), np.uint8)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, kernel_open, iterations=1)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road_cleaned, _cv2.MORPH_CLOSE, kernel_close, iterations=1)
+        
+        num_labels, _, stats, _ = _cv2.connectedComponentsWithStats(vehicles_on_road_cleaned, connectivity=8)
+        blob_count = num_labels - 1
+        
+        blob_sizes = []
+        min_reasonable_blob = 300
+        max_reasonable_blob = 5000
+        for i in range(1, num_labels):
+            blob_size = stats[i, _cv2.CC_STAT_AREA]
+            if min_reasonable_blob <= blob_size <= max_reasonable_blob:
+                blob_sizes.append(blob_size)
+        
+        if blob_sizes:
+            method1_count, _ = estimate_vehicle_count_from_blobs(blob_sizes)
+            method2_count, _ = estimate_vehicles_statistical_clustering(blob_sizes)
+            method3_count, _ = estimate_vehicles_histogram_analysis(blob_sizes)
+            estimated_vehicle_count = min(method1_count, method2_count, method3_count)
+        else:
+            estimated_vehicle_count = 0
+        
+        logger.info(f"Calculated density: {density_percentage}%, Vehicle count: {estimated_vehicle_count}, Blobs: {blob_count}")
+        return {
+            "density": density_percentage,
+            "vehicle_count": estimated_vehicle_count,
+            "blob_count": blob_count
+        }
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return {"density": 0.0}
+        return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
 
 def check_new_day():
     today = datetime.now().date()
@@ -391,7 +549,7 @@ def update_critical_densities(densities_data):
                 critical_densities[camera_code] = max_density
                 logger.info(f"Updated critical density for {camera_code}: {max_density}")
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
-        logger.info("Critical densities updated successfully")
+        logger.info("Critical density updated successfully")
     except Exception as e:
         logger.error(f"Error updating critical density: {e}")
 
@@ -467,7 +625,8 @@ def fetch_and_process_densities():
     global last_density_update
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     last_density_update = datetime.now()
-    results = {"timestamp": timestamp_str, "cameras": {}}
+    density_results = {"timestamp": timestamp_str, "cameras": {}}
+    vehicle_count_results = {"timestamp": timestamp_str, "cameras": {}}
     success_count, failure_count = 0, 0
     for camera_id, camera_name in cameras:
         try:
@@ -478,27 +637,56 @@ def fetch_and_process_densities():
                 failure_count += 1
                 logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
                 density = round(_np.random.uniform(10.0, 90.0), 1)
+                vehicle_count = 0
+                blob_count = 0
             else:
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
                 analysis_result = analyze_image(image)
                 density = analysis_result["density"]
-            density_data = {"name": camera_name, "density": density, "timestamp": timestamp_str}
-            results["cameras"][camera_code] = density_data
+                vehicle_count = analysis_result["vehicle_count"]
+                blob_count = analysis_result["blob_count"]
+            density_data = {
+                "name": camera_name,
+                "density": density,
+                "vehicle_count": vehicle_count,
+                "blob_count": blob_count,
+                "timestamp": timestamp_str
+            }
+            density_results["cameras"][camera_code] = density_data
+            vehicle_count_results["cameras"][camera_code] = {
+                "name": camera_name,
+                "vehicle_count": vehicle_count,
+                "blob_count": blob_count,
+                "timestamp": timestamp_str
+            }
             store_today_density(timestamp_str, camera_code, density_data)
-            logger.info(f"Processed camera {camera_name}: density={density}")
+            logger.info(f"Processed camera {camera_name}: density={density}, vehicle_count={vehicle_count}")
         except Exception as e:
             logger.error(f"Error processing camera {camera_name}: {e}")
             failure_count += 1
-            density_data = {"name": camera_name, "density": 0.0, "timestamp": timestamp_str}
-            results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
+            density_data = {
+                "name": camera_name,
+                "density": 0.0,
+                "vehicle_count": 0,
+                "blob_count": 0,
+                "timestamp": timestamp_str
+            }
+            density_results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
+            vehicle_count_results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
+                "name": camera_name,
+                "vehicle_count": 0,
+                "blob_count": 0,
+                "timestamp": timestamp_str
+            }
             store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
-        upload_json_to_drive(OUTPUT_JSON_FILE, results)
+        upload_json_to_drive(OUTPUT_JSON_FILE, density_results)
+        upload_json_to_drive(VEHICLE_COUNTS_FILE, vehicle_count_results)
     except Exception as e:
-        logger.error(f"Error saving densities.json to Google Drive: {e}")
-    return results
+        logger.error(f"Error saving JSON to Google Drive: {e}")
+    return density_results
 
 def density_worker():
     logger.info("Density worker initialized - running every 30 seconds")
@@ -595,16 +783,35 @@ def get_live_densities():
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        # Fix: Change 'density' to 'densities'
         densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         densities["update_interval"] = "30 seconds"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
             densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
-        return jsonify(densities)  # This was already correct
+        return jsonify(density)
     except Exception as e:
         logger.error(f"Error reading live densities: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vehicle-counts')
+def get_vehicle_counts():
+    try:
+        vehicle_counts = download_json_from_drive(VEHICLE_COUNTS_FILE)
+        if not vehicle_counts:
+            return jsonify({
+                "error": "No vehicle count data available yet",
+                "message": "Please wait for the first calculation cycle"
+            }), 404
+        vehicle_counts["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        vehicle_counts["update_interval"] = "30 seconds"
+        if last_density_update:
+            next_update = last_density_update + timedelta(seconds=30)
+            time_until_next = next_update - datetime.now()
+            vehicle_counts["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+        return jsonify(vehicle_counts)
+    except Exception as e:
+        logger.error(f"Error reading vehicle counts: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/today-densities')
@@ -657,9 +864,8 @@ def get_densities():
         densities = download_json_from_drive(OUTPUT_JSON_FILE)
         if not densities:
             manage_historical_densities()
-            densities = download_json_from_drive(OUTPUT_JSON_FILE)
-        # Fix: Change 'density' to 'densities'
-        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in densities["cameras"].items()}
+            density = download_json_from_drive(OUTPUT_JSON_FILE)
+        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
         return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
@@ -684,6 +890,7 @@ def health_check():
         yesterday_exists = bool(get_file_id(YESTERDAY_DENSITIES_FILE))
         critical_exists = bool(get_file_id(CRITICAL_DENSITIES_FILE))
         output_exists = bool(get_file_id(OUTPUT_JSON_FILE))
+        vehicle_counts_exists = bool(get_file_id(VEHICLE_COUNTS_FILE))
         return jsonify({
             "status": "healthy",
             "storage": {
@@ -692,7 +899,8 @@ def health_check():
                 "today_densities_exists": today_exists,
                 "yesterday_densities_exists": yesterday_exists,
                 "critical_densities_exists": critical_exists,
-                "output_file_exists": output_exists
+                "output_file_exists": output_exists,
+                "vehicle_counts_exists": vehicle_counts_exists
             },
             "using_models": USE_MODELS,
             "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
@@ -710,7 +918,7 @@ def refresh_densities():
         result = fetch_and_process_densities()
         return jsonify({
             "status": "success",
-            "message": "Densities refreshed successfully",
+            "message": "Densities and vehicle counts refreshed successfully",
             "timestamp": result["timestamp"]
         })
     except Exception as e:
@@ -742,7 +950,8 @@ def debug():
             "today_densities_exists": bool(get_file_id(TODAY_DENSITIES_FILE)),
             "yesterday_densities_exists": bool(get_file_id(YESTERDAY_DENSITIES_FILE)),
             "critical_densities_exists": bool(get_file_id(CRITICAL_DENSITIES_FILE)),
-            "output_json_exists": bool(get_file_id(OUTPUT_JSON_FILE))
+            "output_json_exists": bool(get_file_id(OUTPUT_JSON_FILE)),
+            "vehicle_counts_exists": bool(get_file_id(VEHICLE_COUNTS_FILE))
         }
         try:
             files_in_base_dir = os.listdir(os.environ.get('BASE_DIR', os.getcwd()))
@@ -818,7 +1027,6 @@ def debug_model():
             return jsonify({"error": "Dependencies not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         if _road_model is None or _vehicle_model is None:
             return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        # TensorFlow road model debug
         road_success, road_error = False, None
         try:
             test_input_tf = _np.zeros((1, 128, 128, 3), dtype='float32')
@@ -826,7 +1034,6 @@ def debug_model():
             road_success = True
         except Exception as e:
             road_error = str(e)
-        # PyTorch vehicle model debug
         vehicle_success, vehicle_error = False, None
         try:
             test_input_torch = _torch.zeros((1, 3, 384, 384), dtype=_torch.float32).to(DEVICE)
@@ -844,27 +1051,27 @@ def debug_model():
             }
         })
     except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        return jsonify({"error": str(e)}, str(e)}), 500
 
-@app.route('/camera-status')
+@app.route('/camera/status')
 def check_camera_status():
     try:
         results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
         if not load_dependencies():
-            return jsonify({"error": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        for camera_id, camera_name in cameras:
-            camera_code = camera_mapping.get(camera_name, camera_name)
+            return jsonify({"error": "error": str(e), "timestamp": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        for camera_id, camera_image in cameras:
+            camera_code = camera_id.get(camera_id, camera_name)
             try:
                 logger.info(f"Checking camera {camera_name}")
-                image = fetch_camera_image(camera_id)
+                image = None
                 if image is None:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "offline", "error": "Failed to fetch image"}
-                elif image.size > 1000:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
+                    results["cameras"][camera_code] = {"name": "cameras_name", "camera_name": "status", "offline": "error", "Failed to fetch image"}
+                elif image.size > 1500:
+                    results["cameras"][camera_code] = {"name": "camera_name", "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
                 else:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": "Retrieved image is too small or invalid"}
+                    results["cameras"][camera_code] = {"name": "camera_name", "status": "error", "error": "invalid": "Retrieved image is too small or invalid"}
             except Exception as e:
-                results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": str(e)}
+                results["cameras"][camera_code] = {"name": str(e), "status": "error", "error": str(e)}
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
@@ -876,5 +1083,5 @@ if __name__ == "__main__":
         exit(1)
     manage_historical_densities()
     start_worker()
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
