@@ -1051,7 +1051,10 @@ def debug_model():
             }
         })
     except Exception as e:
-        return jsonify({"error": str(e)}, str(e)}), 500
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
 
 @app.route('/camera/status')
 def check_camera_status():
