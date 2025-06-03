@@ -12,3 +12,5 @@ google-auth-httplib2==0.2.0
 pytz==2025.2
 torch==2.4.1
 torchvision==0.19.1
+structlog==23.1.0
+sentry-sdk[flask]==1.38.0
