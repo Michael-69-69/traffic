@@ -17,13 +17,34 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import requests
+import structlog
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+
+# Initialize Sentry
+sentry_sdk.init(
+    dsn=os.environ.get('SENTRY_DSN', ''),
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0,
+    environment="production"
+)
+
+# Configure structlog
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.add_log_level,
+        structlog.processors.JSONRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+logger = structlog.get_logger()
 
 # Initialize Flask
 app = Flask(__name__)
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # Google Drive setup
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -54,9 +75,10 @@ def init_google_drive():
             token_uri="https://oauth2.googleapis.com/token"
         )
         drive_service = build('drive', 'v3', credentials=creds)
-        logger.info("Google Drive service initialized successfully")
+        logger.info("google_drive_initialized")
     except Exception as e:
-        logger.error(f"Failed to initialize Google Drive: {e}")
+        logger.error("google_drive_init_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         drive_service = None
 
 # Utility functions for Google Drive operations
@@ -69,7 +91,8 @@ def get_file_id(filename):
             return files[0]['id']
         return None
     except Exception as e:
-        logger.error(f"Error finding file {filename} in Google Drive: {e}")
+        logger.error("get_file_id_failed", filename=filename, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return None
 
 def upload_json_to_drive(filename, data):
@@ -86,7 +109,7 @@ def upload_json_to_drive(filename, data):
                 fileId=file_id,
                 media_body=media
             ).execute()
-            logger.info(f"Updated {filename} in Google Drive")
+            logger.info("file_updated", filename=filename)
         else:
             file_metadata = {
                 'name': filename,
@@ -98,17 +121,18 @@ def upload_json_to_drive(filename, data):
                 media_body=media,
                 fields='id'
             ).execute()
-            logger.info(f"Uploaded {filename} to Google Drive")
+            logger.info("file_uploaded", filename=filename)
         
         os.remove(temp_file)
     except Exception as e:
-        logger.error(f"Error uploading {filename} to Google Drive: {e}")
+        logger.error("upload_failed", filename=filename, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
 
 def download_json_from_drive(filename):
     try:
         file_id = get_file_id(filename)
         if not file_id:
-            logger.warning(f"File {filename} not found in Google Drive")
+            logger.warning("file_not_found", filename=filename)
             return None
         
         request = drive_service.files().get_media(fileId=file_id)
@@ -120,10 +144,11 @@ def download_json_from_drive(filename):
         
         fh.seek(0)
         data = json.loads(fh.read().decode('utf-8'))
-        logger.info(f"Downloaded {filename} from Google Drive")
+        logger.info("file_downloaded", filename=filename)
         return data
     except Exception as e:
-        logger.error(f"Error downloading {filename} from Google Drive: {e}")
+        logger.error("download_failed", filename=filename, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return None
 
 # Base URL and default parameters for the camera feed
@@ -140,14 +165,14 @@ camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
 ]
 
@@ -165,18 +190,18 @@ def parse_camera_data():
                 camera_code = chr(65 + idx)
                 cameras.append((camera_id, camera_location))
                 camera_mapping[camera_location] = camera_code
-                logger.info(f"Parsed camera {camera_code}: {camera_location} (ID: {camera_id})")
+                logger.info("camera_parsed", camera_code=camera_code, camera_location=camera_location, camera_id=camera_id)
         except Exception as e:
-            logger.error(f"Error parsing camera URL {url}: {e}")
+            logger.error("camera_parse_failed", url=url, error=str(e), exc_info=True)
+            sentry_sdk.capture_exception(e)
     return cameras, camera_mapping
 
 # Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
-# Vehicle counting functions from standalone script
+# Vehicle counting functions
 def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
-    """Estimate vehicle count by analyzing blob size patterns with adaptive logic for large-only blobs"""
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -188,7 +213,7 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
         median_blob = np.median(sizes)
         
         if smallest_blob > 1000:
-            logger.info("Only large blobs detected - using fixed vehicle size estimate")
+            logger.info("large_blobs_only", unit_size=150)
             return 150
         
         q5, q95 = np.percentile(sizes, [5, 95])
@@ -201,9 +226,9 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
         
         if single_vehicle_candidates and min(single_vehicle_candidates) <= 800:
             unit_size = np.median(single_vehicle_candidates)
-            logger.info(f"Found small reference blobs - estimated unit size: {unit_size:.0f}px")
+            logger.info("small_blobs_found", unit_size=unit_size)
         else:
-            logger.info("No small reference blobs found - using fixed vehicle size")
+            logger.info("no_small_blobs", unit_size=150)
             unit_size = 150
         
         return max(300, min(unit_size, 1200))
@@ -221,7 +246,6 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
     return int(total_vehicles), int(unit_vehicle_size)
 
 def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
-    """Use statistical analysis to find vehicle count with adaptive logic for large-only blobs"""
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -232,7 +256,7 @@ def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
     smallest_blob = min(sizes)
     
     if smallest_blob > 1000:
-        logger.info("Statistical method: Only large blobs - using fixed 150px vehicle size")
+        logger.info("statistical_large_blobs", unit_size=150)
         avg_single_vehicle = 150
         vehicle_count = 0
         for blob_size in sizes:
@@ -263,7 +287,6 @@ def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
     return vehicle_count, int(avg_single_vehicle)
 
 def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
-    """Find vehicle count using histogram peak analysis with adaptive logic for large-only blobs"""
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -274,7 +297,7 @@ def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
     smallest_blob = min(sizes)
     
     if smallest_blob > 1000:
-        logger.info("Histogram method: Only large blobs - using fixed 150px vehicle size")
+        logger.info("histogram_large_blobs", unit_size=150)
         typical_vehicle_size = 150
         total_vehicles = 0
         for size in sizes:
@@ -374,46 +397,37 @@ def load_dependencies():
             _tf.config.threading.set_inter_op_parallelism_threads(1)
             _session = _requests.Session()
             _session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"})
-            logger.info("Dependencies loaded successfully")
+            logger.info("dependencies_loaded")
             return True
         except Exception as e:
-            logger.error(f"Failed to load dependencies: {e}")
+            logger.error("dependencies_load_failed", error=str(e), exc_info=True)
+            sentry_sdk.capture_exception(e)
             return False
     return True
 
 def load_models():
     global _road_model, _vehicle_model
-    logger.info("=============================================")
-    logger.info("LOADING MODELS - FORCED ATTEMPT")
-    logger.info("=============================================")
+    logger.info("loading_models")
     if not load_dependencies():
-        logger.error("Failed to load dependencies - cannot load models")
+        logger.error("dependencies_not_loaded")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
     road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
     vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
-    logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, Vehicle: {os.path.exists(vehicle_model_path)}")
+    logger.info("checking_model_files", road_exists=os.path.exists(road_model_path), vehicle_exists=os.path.exists(vehicle_model_path))
     try:
-        logger.info("Loading road segmentation model (TensorFlow)...")
+        logger.info("loading_road_model")
         _road_model = _tf.keras.models.load_model(road_model_path)
-        logger.info("Loading vehicle detection model (PyTorch)...")
+        logger.info("loading_vehicle_model")
         _vehicle_model = MiniUNet(in_channels=3, out_channels=1).to(DEVICE)
         checkpoint = _torch.load(vehicle_model_path, map_location=DEVICE)
         _vehicle_model.load_state_dict(checkpoint['model_state_dict'])
         _vehicle_model.eval()
-        logger.info("=============================================")
-        logger.info("MODELS LOADED SUCCESSFULLY")
-        logger.info(f"Vehicle model trained for {checkpoint.get('epoch', 'N/A')+1} epochs")
-        logger.info(f"Best validation IoU: {checkpoint.get('val_iou', 'N/A'):.3f}")
-        logger.info("=============================================")
+        logger.info("models_loaded", epochs=checkpoint.get('epoch', 'N/A')+1, val_iou=checkpoint.get('val_iou', 'N/A'))
         return True
     except Exception as e:
-        logger.error(f"Error loading models: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        logger.error("=============================================")
-        logger.error("MODEL LOADING FAILED")
-        logger.error("=============================================")
+        logger.error("model_load_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return False
 
 def preprocess_image(img):
@@ -444,13 +458,14 @@ def analyze_image(image):
         return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
     try:
         if _road_model is None or _vehicle_model is None:
-            logger.warning("Models not loaded, using fallback values")
+            logger.warning("models_not_loaded")
             return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
         img_road, img_vehicle = preprocess_image(image)
         if img_road is None or img_vehicle is None:
             return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
         
         # Road segmentation
+        start_time = time.time()
         road_pred = _road_model.predict(img_road, verbose=0)
         road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
         road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
@@ -507,16 +522,16 @@ def analyze_image(image):
         else:
             estimated_vehicle_count = 0
         
-        logger.info(f"Calculated density: {density_percentage}%, Vehicle count: {estimated_vehicle_count}, Blobs: {blob_count}")
+        processing_time = time.time() - start_time
+        logger.info("analysis_complete", density=density_percentage, vehicle_count=estimated_vehicle_count, blob_count=blob_count, processing_time=processing_time)
         return {
             "density": density_percentage,
             "vehicle_count": estimated_vehicle_count,
             "blob_count": blob_count
         }
     except Exception as e:
-        logger.error(f"Error analyzing image: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error("image_analysis_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return {"density": 0.0, "vehicle_count": 0, "blob_count": 0}
 
 def check_new_day():
@@ -526,32 +541,33 @@ def check_new_day():
         try:
             file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
             if file_date < today:
-                logger.info(f"New day detected. Transferring data from {file_date} to yesterday")
+                logger.info("new_day_detected", file_date=file_date.strftime('%Y-%m-%d'))
                 upload_json_to_drive(YESTERDAY_DENSITIES_FILE, today_densities)
                 update_critical_densities(today_densities)
                 today_densities = {'date': today.strftime('%Y-%m-%d'), 'densities_by_time': {}}
                 upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
-                logger.info("Successfully transferred data to yesterday and reset today's data")
+                logger.info("date_transferred")
         except Exception as e:
-            logger.error(f"Error processing date change: {e}")
+            logger.error("date_change_failed", error=str(e), exc_info=True)
+            sentry_sdk.capture_exception(e)
 
 def update_critical_densities(densities_data):
     try:
         critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE) or {}
         density_by_time = densities_data.get('densities_by_time', {})
         for camera_code in camera_mapping.values():
-            max_density = 0.0
+            max_density = -float('inf')
             for timestamp, cameras_data in density_by_time.items():
                 if camera_code in cameras_data:
                     density = cameras_data[camera_code].get('density', 0.0)
                     max_density = max(max_density, density)
             if camera_code not in critical_densities or max_density > critical_densities[camera_code]:
                 critical_densities[camera_code] = max_density
-                logger.info(f"Updated critical density for {camera_code}: {max_density}")
+                logger.info("critical_density_updated", camera_code=camera_code, max_density=max_density)
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
-        logger.info("Critical density updated successfully")
     except Exception as e:
-        logger.error(f"Error updating critical density: {e}")
+        logger.error("critical_densities_update_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
 
 def manage_historical_densities():
     check_new_day()
@@ -585,28 +601,23 @@ def fetch_camera_image(camera_id):
         })
         _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
         url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
-        logger.info(f"Fetching image from {url}")
+        logger.info("fetching_image", camera_id=camera_id, url=url)
         response = _session.get(url, timeout=10)
         response.raise_for_status()
         image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
         image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
         if image is None:
-            logger.warning(f"Failed to decode image from {url}")
+            logger.warning("image_decode_failed", url=url)
             return None
+        logger.info("image_fetched", camera_id=camera_id)
         return image
     except _requests.exceptions.HTTPError as e:
-        if e.response.status_code == 403:
-            logger.error(f"403 Forbidden for {url}: Check API key or server permissions")
-            try:
-                logger.error(f"Response headers: {e.response.headers}")
-                logger.error(f"Response content: {e.response.text[:500]}")
-            except:
-                pass
-        else:
-            logger.error(f"HTTP error fetching camera image for {camera_id}: {e}")
+        logger.error("http_error", camera_id=camera_id, status_code=e.response.status_code if hasattr(e, 'response') else None, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return None
     except Exception as e:
-        logger.error(f"Error fetching camera image for {camera_id}: {e}")
+        logger.error("fetch_image_failed", camera_id=camera_id, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return None
 
 def store_today_density(timestamp_str, camera_code, density_data):
@@ -618,8 +629,10 @@ def store_today_density(timestamp_str, camera_code, density_data):
             today_densities['densities_by_time'][timestamp_str] = {}
         today_densities['densities_by_time'][timestamp_str][camera_code] = density_data
         upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
+        logger.info("density_stored", timestamp=timestamp_str, camera_code=camera_code)
     except Exception as e:
-        logger.error(f"Error storing today's density: {e}")
+        logger.error("store_density_failed", timestamp=timestamp_str, error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
 
 def fetch_and_process_densities():
     global last_density_update
@@ -628,110 +641,102 @@ def fetch_and_process_densities():
     density_results = {"timestamp": timestamp_str, "cameras": {}}
     vehicle_count_results = {"timestamp": timestamp_str, "cameras": {}}
     success_count, failure_count = 0, 0
-    for camera_id, camera_name in cameras:
-        try:
-            logger.info(f"Processing camera {camera_name}")
-            camera_code = camera_mapping.get(camera_name, camera_name)
-            image = fetch_camera_image(camera_id)
-            if image is None:
-                failure_count += 1
-                logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
-                density = round(_np.random.uniform(10.0, 90.0), 1)
-                vehicle_count = 0
-                blob_count = 0
-            else:
-                success_count += 1
-                logger.info(f"Successfully fetched image for {camera_name}")
-                analysis_result = analyze_image(image)
-                density = analysis_result["density"]
-                vehicle_count = analysis_result["vehicle_count"]
-                blob_count = analysis_result["blob_count"]
-            density_data = {
-                "name": camera_name,
-                "density": density,
-                "vehicle_count": vehicle_count,
-                "blob_count": blob_count,
-                "timestamp": timestamp_str
-            }
-            density_results["cameras"][camera_code] = density_data
-            vehicle_count_results["cameras"][camera_code] = {
-                "name": camera_name,
-                "vehicle_count": vehicle_count,
-                "blob_count": blob_count,
-                "timestamp": timestamp_str
-            }
-            store_today_density(timestamp_str, camera_code, density_data)
-            logger.info(f"Processed camera {camera_name}: density={density}, vehicle_count={vehicle_count}")
-        except Exception as e:
-            logger.error(f"Error processing camera {camera_name}: {e}")
-            failure_count += 1
-            density_data = {
-                "name": camera_name,
-                "density": 0.0,
-                "vehicle_count": 0,
-                "blob_count": 0,
-                "timestamp": timestamp_str
-            }
-            density_results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
-            vehicle_count_results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
-                "name": camera_name,
-                "vehicle_count": 0,
-                "blob_count": 0,
-                "timestamp": timestamp_str
-            }
-            store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
-    logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
+        for camera_id, camera_name in cameras:
+            try:
+                logger.info("processing_camera", camera_name=camera_name, camera_id=camera_id)
+                camera_code = camera_mapping.get(camera_name, camera_name)
+                image = fetch_camera_image(camera_id)
+                if image is None:
+                    failure_count += 1
+                    logger.warning("image_fetch_failed", camera_id=camera_id)
+                    density = round(_np.random.uniform(10.0, 90.0), 1)
+                    vehicle_count = 0
+                    blob_count = 0
+                else:
+                    success_count += 1
+                    analysis_result = analyze_image(image)
+                    density = analysis_result["density"]
+                    vehicle_count = analysis_result["vehicle_count"]
+                    blob_count = analysis_result["blob_count"]
+                density_data = {
+                    "name": camera_name,
+                    "density": density,
+                    "vehicle_count": vehicle_count,
+                    "blob_count": blob_count,
+                    "timestamp": timestamp_str
+                }
+                density_results["cameras"][camera_code] = density_data
+                vehicle_count_results["cameras"][camera_code] = {
+                    "name": camera_name,
+                    "vehicle_count": vehicle_count,
+                    "blob_count": blob_count,
+                    "timestamp": timestamp_str
+                }
+                store_today_density(timestamp_str, camera_code, density_data)
+                logger.info("camera_processed", camera_name=camera_name, density=density, vehicle_count=vehicle_count)
+            except Exception as e:
+                logger.error("camera_processing_failed", camera_name=camera_name, error=str(e), exc_info=True)
+                sentry_sdk.capture_exception(e)
+                failure_count += 1
+                density_data = {
+                    "name": camera_name,
+                    "density": 0.0,
+                    "vehicle_count": 0,
+                    "blob_count": 0,
+                    "timestamp": timestamp_str
+                }
+                density_results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
+                vehicle_count_results["cameras"][camera_mapping.get(camera_name, camera_name)] = {
+                    "name": camera_name,
+                    "vehicle_count": 0,
+                    "blob_count": 0,
+                    "timestamp": timestamp_str
+                }
+                store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
+        logger.info("processing_complete", success_count=success_count, failure_count=failure_count)
         upload_json_to_drive(OUTPUT_JSON_FILE, density_results)
         upload_json_to_drive(VEHICLE_COUNTS_FILE, vehicle_count_results)
     except Exception as e:
-        logger.error(f"Error saving JSON to Google Drive: {e}")
+        logger.error("processing_cycle_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
     return density_results
 
 def density_worker():
-    logger.info("Density worker initialized - running every 30 seconds")
+    logger.info("density_worker_started")
     try:
-        logger.info("Starting initial density calculation")
         manage_historical_densities()
         fetch_and_process_densities()
-        logger.info("Initial density calculation completed")
+        logger.info("initial_density_completed")
         while True:
             try:
-                logger.info("Starting density processing cycle (30-second interval)")
+                logger.info("starting_density_cycle")
                 fetch_and_process_densities()
-                logger.info("Density processing cycle completed")
+                logger.info("density_cycle_completed")
                 time.sleep(30)
             except Exception as e:
-                logger.error(f"Error in density worker cycle: {e}")
+                logger.error("density_cycle_failed", error=str(e), exc_info=True)
+                sentry_sdk.capture_exception(e)
                 time.sleep(10)
     except Exception as e:
-        logger.error(f"Critical error in density worker: {e}")
+        logger.error("density_worker_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
 
 def start_worker():
     try:
-        logger.info("Starting worker - FOCUSING ON MODEL LOADING")
-        logger.info("Attempting to load models (forced)...")
+        logger.info("starting_worker")
         load_success = load_models()
         if load_success:
-            logger.info("Models loaded successfully!")
+            logger.info("models_loaded_successfully")
         else:
-            logger.error("Failed to load models! Check logs for details.")
-            if not load_dependencies():
-                logger.error("Problem: Dependencies failed to load")
-            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras")):
-                logger.error("Problem: Road model file not found")
-            elif not os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth")):
-                logger.error("Problem: Vehicle model file not found")
-            else:
-                logger.error("Problem: Unclear - check model format or compatibility")
-        logger.info("Starting density worker thread...")
+            logger.error("models_load_failed")
+            sentry_sdk.capture_message("Model loading failed")
         density_thread = threading.Thread(target=density_worker, daemon=True)
         density_thread.start()
-        logger.info("Density worker thread started")
+        logger.info("density_worker_thread_started")
     except Exception as e:
-        logger.error(f"Failed to start worker: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error("worker_start_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
 
 def date_transition_worker():
     while True:
@@ -740,13 +745,13 @@ def date_transition_worker():
         seconds_until_midnight = (midnight - now).total_seconds()
         time.sleep(seconds_until_midnight + 1)
         check_new_day()
-        logger.info(f"Date transition completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("date_transition_completed", timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
 # Initialize Google Drive and start workers
 if __name__ != "__main__":
     init_google_drive()
     if drive_service is None:
-        logger.error("Google Drive initialization failed. Application may not function correctly.")
+        logger.error("google_drive_init_failed")
     else:
         threading.Thread(target=date_transition_worker, daemon=True).start()
         start_worker()
@@ -771,27 +776,29 @@ def get_cameras():
             "cameras": cameras_info
         })
     except Exception as e:
-        logger.error(f"Error fetching cameras: {e}")
+        logger.error("cameras_fetch_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/live-densities')
 def get_live_densities():
     try:
-        densities = download_json_from_drive(OUTPUT_JSON_FILE)
-        if not densities:
+        density = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not density:
             return jsonify({
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        densities["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
-        densities["update_interval"] = "30 seconds"
+        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        density["update_interval"] = "30 seconds"
         if last_density_update:
             next_update = last_density_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
-            densities["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+            density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(density)
     except Exception as e:
-        logger.error(f"Error reading live densities: {e}")
+        logger.error("live_densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/vehicle-counts')
@@ -811,7 +818,8 @@ def get_vehicle_counts():
             vehicle_counts["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(vehicle_counts)
     except Exception as e:
-        logger.error(f"Error reading vehicle counts: {e}")
+        logger.error("vehicle_counts_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/today-densities')
@@ -823,7 +831,8 @@ def get_today_densities():
             today_densities = download_json_from_drive(TODAY_DENSITIES_FILE)
         return jsonify(today_densities)
     except Exception as e:
-        logger.error(f"Error reading today's densities: {e}")
+        logger.error("today_densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/yesterday-densities')
@@ -838,7 +847,8 @@ def get_yesterday_densities():
             })
         return jsonify(yesterday_densities)
     except Exception as e:
-        logger.error(f"Error reading yesterday's densities: {e}")
+        logger.error("yesterday_densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/critical-densities')
@@ -855,20 +865,22 @@ def get_critical_densities():
         }
         return jsonify(result)
     except Exception as e:
-        logger.error(f"Error reading critical densities: {e}")
+        logger.error("critical_densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/densities')
 def get_densities():
     try:
-        densities = download_json_from_drive(OUTPUT_JSON_FILE)
-        if not densities:
+        density = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not density:
             manage_historical_densities()
             density = download_json_from_drive(OUTPUT_JSON_FILE)
         raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
         return jsonify(raw_densities)
     except Exception as e:
-        logger.error(f"Error reading densities: {e}")
+        logger.error("densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/status')
@@ -878,7 +890,7 @@ def status():
         "memory_optimized": True,
         "version": "1.0",
         "using_models": USE_MODELS,
-        "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
+        "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None,
         "total_cameras": len(cameras),
         "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
@@ -907,6 +919,8 @@ def health_check():
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
+        logger.error("health_check_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
             "status": "unhealthy",
             "error": str(e)
@@ -918,13 +932,15 @@ def refresh_densities():
         result = fetch_and_process_densities()
         return jsonify({
             "status": "success",
-            "message": "Densities and vehicle counts refreshed successfully",
+            "message": "Densities and vehicle counts refreshed",
             "timestamp": result["timestamp"]
         })
     except Exception as e:
+        logger.error("refresh_densities_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
             "status": "error",
-            "message": f"Failed to refresh densities: {str(e)}"
+            "message": str(e)
         }), 500
 
 @app.route('/debug')
@@ -956,11 +972,11 @@ def debug():
         try:
             files_in_base_dir = os.listdir(os.environ.get('BASE_DIR', os.getcwd()))
         except Exception as e:
-            files_in_base_dir = f"Error listing files: {str(e)}"
+            files_in_base_dir = str(e)
         model_load_status = {
             "road_model_loaded": _road_model is not None,
             "vehicle_model_loaded": _vehicle_model is not None,
-            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None and _transforms is not None
+            "dependencies_loaded": all(x is not None for x in [_tf, _cv2, _np, _requests, _torch, _transforms])
         }
         try:
             import psutil
@@ -972,7 +988,7 @@ def debug():
                 "process_memory_mb": round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 2)
             }
         except Exception as e:
-            memory_info = f"Error getting system resources: {str(e)}"
+            memory_info = str(e)
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "model_files": model_info,
@@ -986,10 +1002,10 @@ def debug():
             "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         })
     except Exception as e:
-        logger.error(f"Error in debug endpoint: {e}")
+        logger.error("debug_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
-            "error": "Debug information collection failed",
-            "details": str(e),
+            "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
 
@@ -1011,12 +1027,11 @@ def force_load_models():
         }
         return jsonify(status)
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
+        logger.error("load_models_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": error_details,
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }), 500
 
@@ -1029,15 +1044,15 @@ def debug_model():
             return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         road_success, road_error = False, None
         try:
-            test_input_tf = _np.zeros((1, 128, 128, 3), dtype='float32')
+            test_input_tf = np.zeros((1, 128, 128, 3), dtype='float32')
             _road_model.predict(test_input_tf, verbose=0)
             road_success = True
         except Exception as e:
             road_error = str(e)
         vehicle_success, vehicle_error = False, None
         try:
-            test_input_torch = _torch.zeros((1, 3, 384, 384), dtype=_torch.float32).to(DEVICE)
-            with _torch.no_grad():
+            test_input_torch = torch.zeros((1, 3, 384, 384), dtype=torch.float32).to(DEVICE)
+            with torch.no_grad():
                 _vehicle_model(test_input_torch)
             vehicle_success = True
         except Exception as e:
@@ -1051,6 +1066,8 @@ def debug_model():
             }
         })
     except Exception as e:
+        logger.error("debug_model_failed", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
             "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1065,10 +1082,10 @@ def check_camera_status():
                 "error": "Failed to load dependencies",
                 "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }), 500
-        for camera_id, camera_name in cameras:  # Fixed variable name from camera_image to camera_name
-            camera_code = camera_mapping.get(camera_name, camera_name)  # Use mapping for code
+        for camera_id, camera_name in cameras:
+            camera_code = camera_mapping.get(camera_name, camera_name)
             try:
-                logger.info("checking_camera", camera_name=camera_name, camera_id=camera_id)
+                logger.info("checking_camera", camera_name=camera_name, id=camera_id)
                 image = fetch_camera_image(camera_id)
                 if image is None:
                     results["cameras"][camera_code] = {
@@ -1090,6 +1107,7 @@ def check_camera_status():
                     }
             except Exception as e:
                 logger.error("camera_check_failed", camera_id=camera_id, error=str(e), exc_info=True)
+                sentry_sdk.capture_exception(e)
                 results["cameras"][camera_code] = {
                     "name": camera_name,
                     "status": "error",
@@ -1098,6 +1116,7 @@ def check_camera_status():
         return jsonify(results)
     except Exception as e:
         logger.error("camera_status_error", error=str(e), exc_info=True)
+        sentry_sdk.capture_exception(e)
         return jsonify({
             "error": str(e),
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1106,9 +1125,9 @@ def check_camera_status():
 if __name__ == "__main__":
     init_google_drive()
     if drive_service is None:
-        logger.error("Google Drive initialization failed. Exiting.")
+        logger.error("google_drive_init_failed")
         exit(1)
     manage_historical_densities()
     start_worker()
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
