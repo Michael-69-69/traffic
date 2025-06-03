@@ -412,7 +412,7 @@ def load_models():
         logger.error("dependencies_not_loaded")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
-    road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
     vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
     logger.info("checking_model_files", road_exists=os.path.exists(road_model_path), vehicle_exists=os.path.exists(vehicle_model_path))
     try:
@@ -955,7 +955,7 @@ def refresh_densities():
 def debug():
     try:
         model_info = {
-            "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
+            "unet_road_segmentation_tf": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation.keras"))},
             "filtered_model_cpu": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
         }
         env_vars = {
@@ -1028,7 +1028,7 @@ def force_load_models():
             "load_attempt_success": load_success,
             "models_loaded": {"road_model": road_success, "vehicle_model": vehicle_success},
             "model_files": {
-                "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
+                "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation.keras"))},
                 "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
             },
             "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
