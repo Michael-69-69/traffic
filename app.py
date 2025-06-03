@@ -1061,23 +1061,47 @@ def check_camera_status():
     try:
         results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
         if not load_dependencies():
-            return jsonify({"error": "error": str(e), "timestamp": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        for camera_id, camera_image in cameras:
-            camera_code = camera_id.get(camera_id, camera_name)
+            return jsonify({
+                "error": "Failed to load dependencies",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }), 500
+        for camera_id, camera_name in cameras:  # Fixed variable name from camera_image to camera_name
+            camera_code = camera_mapping.get(camera_name, camera_name)  # Use mapping for code
             try:
-                logger.info(f"Checking camera {camera_name}")
-                image = None
+                logger.info("checking_camera", camera_name=camera_name, camera_id=camera_id)
+                image = fetch_camera_image(camera_id)
                 if image is None:
-                    results["cameras"][camera_code] = {"name": "cameras_name", "camera_name": "status", "offline": "error", "Failed to fetch image"}
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "status": "offline",
+                        "error": "Failed to fetch image"
+                    }
                 elif image.size > 1500:
-                    results["cameras"][camera_code] = {"name": "camera_name", "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "status": "online",
+                        "resolution": f"{image.shape[1]}x{image.shape[0]}"
+                    }
                 else:
-                    results["cameras"][camera_code] = {"name": "camera_name", "status": "error", "error": "invalid": "Retrieved image is too small or invalid"}
+                    results["cameras"][camera_code] = {
+                        "name": camera_name,
+                        "status": "error",
+                        "error": "Retrieved image is too small or invalid"
+                    }
             except Exception as e:
-                results["cameras"][camera_code] = {"name": str(e), "status": "error", "error": str(e)}
+                logger.error("camera_check_failed", camera_id=camera_id, error=str(e), exc_info=True)
+                results["cameras"][camera_code] = {
+                    "name": camera_name,
+                    "status": "error",
+                    "error": str(e)
+                }
         return jsonify(results)
     except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        logger.error("camera_status_error", error=str(e), exc_info=True)
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }), 500
 
 if __name__ == "__main__":
     init_google_drive()
