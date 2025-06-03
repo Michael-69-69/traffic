@@ -165,13 +165,13 @@ camera_websites = [
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A9%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
     'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
 ]
@@ -200,8 +200,8 @@ def parse_camera_data():
 cameras, camera_mapping = parse_camera_data()
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
 
-# Vehicle counting functions
-def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
+# Vehicle counting functions from standalone script
+def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=500):
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -212,9 +212,9 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
         smallest_blob = min(sizes)
         median_blob = np.median(sizes)
         
-        if smallest_blob > 1000:
-            logger.info("large_blobs_only", unit_size=150)
-            return 150
+        if smallest_blob > 1500:
+            logger.info("large_blobs_only", unit_size=200)
+            return 200
         
         q5, q95 = np.percentile(sizes, [5, 95])
         filtered_sizes = [s for s in sizes if q5 <= s <= q95]
@@ -224,14 +224,14 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
         
         single_vehicle_candidates = [s for s in filtered_sizes if s <= np.percentile(filtered_sizes, 25)]
         
-        if single_vehicle_candidates and min(single_vehicle_candidates) <= 800:
+        if single_vehicle_candidates and min(single_vehicle_candidates) <= 1200:
             unit_size = np.median(single_vehicle_candidates)
             logger.info("small_blobs_found", unit_size=unit_size)
         else:
-            logger.info("no_small_blobs", unit_size=150)
-            unit_size = 150
+            logger.info("no_small_blobs", unit_size=200)
+            unit_size = 200
         
-        return max(300, min(unit_size, 1200))
+        return max(500, min(unit_size, 1800))
     
     unit_vehicle_size = find_vehicle_unit_size(significant_blobs)
     
@@ -245,7 +245,7 @@ def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=300):
     
     return int(total_vehicles), int(unit_vehicle_size)
 
-def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
+def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=500):
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -255,9 +255,9 @@ def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
     
     smallest_blob = min(sizes)
     
-    if smallest_blob > 1000:
-        logger.info("statistical_large_blobs", unit_size=150)
-        avg_single_vehicle = 150
+    if smallest_blob > 1500:
+        logger.info("statistical_large_blobs", unit_size=200)
+        avg_single_vehicle = 200
         vehicle_count = 0
         for blob_size in sizes:
             vehicles_in_blob = max(1, int(blob_size / avg_single_vehicle))
@@ -275,9 +275,9 @@ def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
     if len(single_vehicle_blobs) > 0:
         avg_single_vehicle = np.median(single_vehicle_blobs)
     else:
-        avg_single_vehicle = max(150, q20)
+        avg_single_vehicle = max(200, q20)
     
-    avg_single_vehicle = max(150, min(avg_single_vehicle, 1000))
+    avg_single_vehicle = max(200, min(avg_single_vehicle, 1500))
     
     vehicle_count = len(single_vehicle_blobs)
     for blob_size in multi_vehicle_blobs:
@@ -286,7 +286,7 @@ def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=300):
     
     return vehicle_count, int(avg_single_vehicle)
 
-def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
+def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=500):
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     
     if not significant_blobs:
@@ -296,9 +296,9 @@ def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
     
     smallest_blob = min(sizes)
     
-    if smallest_blob > 1000:
-        logger.info("histogram_large_blobs", unit_size=150)
-        typical_vehicle_size = 150
+    if smallest_blob > 1500:
+        logger.info("histogram_large_blobs", unit_size=200)
+        typical_vehicle_size = 200
         total_vehicles = 0
         for size in sizes:
             vehicles_in_blob = max(1, int(size / typical_vehicle_size))
@@ -319,7 +319,7 @@ def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=300):
     else:
         typical_vehicle_size = np.median(sizes)
     
-    typical_vehicle_size = max(150, min(typical_vehicle_size, 1000))
+    typical_vehicle_size = max(200, min(typical_vehicle_size, 1500))
     
     total_vehicles = 0
     for size in sizes:
@@ -433,22 +433,24 @@ def load_models():
 def preprocess_image(img):
     if not load_dependencies() or img is None:
         return None, None
-    img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
-    y, cr, cb = _cv2.split(img_road)
-    clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-    y = clahe.apply(y)
-    enhanced_img = _cv2.merge((y, cr, cb))
-    img_road = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
-    img_road = _cv2.resize(img_road, (128, 128))
+    # Enhance contrast using CLAHE
+    img_yuv = _cv2.cvtColor(img, _cv2.COLOR_BGR2YUV)
+    clahe = _cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    img_yuv[:,:,0] = clahe.apply(img_yuv[:,:,0])
+    img_enhanced = _cv2.cvtColor(img_yuv, _cv2.COLOR_YUV2BGR)
+    
+    # Preprocess for road model
+    img_road = _cv2.resize(img_enhanced, (128, 128))
     img_road = img_road.astype('float32') / 255.0
     img_road = _np.expand_dims(img_road, axis=0)
     
+    # Preprocess for vehicle model
     transform = _transforms.Compose([
         _transforms.ToPILImage(),
         _transforms.Resize((384, 384)),
         _transforms.ToTensor(),
     ])
-    img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
+    img_rgb = _cv2.cvtColor(img_enhanced, _cv2.COLOR_BGR2RGB)
     img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
     
     return img_road, img_vehicle
@@ -487,7 +489,7 @@ def analyze_image(image):
             vehicle_pred = _vehicle_model(img_vehicle)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
-        binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
+        binary_vehicle_mask = (vehicle_mask_resized > 0.2).astype(np.uint8)  # Lowered threshold
         
         # Calculate density
         road_binary = (refined_road_mask > 0).astype(np.uint8)
@@ -507,27 +509,30 @@ def analyze_image(image):
         blob_count = num_labels - 1
         
         blob_sizes = []
-        min_reasonable_blob = 300
-        max_reasonable_blob = 5000
+        min_reasonable_blob = 500  # Aligned with standalone
+        max_reasonable_blob = 8000  # Aligned with standalone
         for i in range(1, num_labels):
             blob_size = stats[i, _cv2.CC_STAT_AREA]
             if min_reasonable_blob <= blob_size <= max_reasonable_blob:
                 blob_sizes.append(blob_size)
         
+        logger.info("blob_analysis", blob_count=blob_count, significant_blobs=len(blob_sizes), blob_sizes=blob_sizes)
+        
         if blob_sizes:
-            method1_count, _ = estimate_vehicle_count_from_blobs(blob_sizes)
-            method2_count, _ = estimate_vehicles_statistical_clustering(blob_sizes)
-            method3_count, _ = estimate_vehicles_histogram_analysis(blob_sizes)
+            method1_count, method1_unit = estimate_vehicle_count_from_blobs(blob_sizes)
+            method2_count, method2_unit = estimate_vehicles_statistical_clustering(blob_sizes)
+            method3_count, method3_unit = estimate_vehicles_histogram_analysis(blob_sizes)
             estimated_vehicle_count = min(method1_count, method2_count, method3_count)
+            logger.info("vehicle_count_estimates", method1=method1_count, method2=method2_count, method3=method3_count, final=estimated_vehicle_count)
         else:
             estimated_vehicle_count = 0
         
         processing_time = time.time() - start_time
-        logger.info("analysis_complete", density=density_percentage, vehicle_count=estimated_vehicle_count, blob_count=blob_count, processing_time=processing_time)
+        logger.info("analysis_complete", density=density_percentage, vehicle_count=estimated_vehicle_count, blob_count=len(blob_sizes), processing_time=processing_time)
         return {
             "density": density_percentage,
             "vehicle_count": estimated_vehicle_count,
-            "blob_count": blob_count
+            "blob_count": len(blob_sizes)
         }
     except Exception as e:
         logger.error("image_analysis_failed", error=str(e), exc_info=True)
@@ -602,18 +607,21 @@ def fetch_camera_image(camera_id):
         _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
         url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
         logger.info("fetching_image", camera_id=camera_id, url=url)
-        response = _session.get(url, timeout=10)
-        response.raise_for_status()
-        image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
-        image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-        if image is None:
-            logger.warning("image_decode_failed", url=url)
-            return None
-        logger.info("image_fetched", camera_id=camera_id)
-        return image
-    except _requests.exceptions.HTTPError as e:
-        logger.error("http_error", camera_id=camera_id, status_code=e.response.status_code if hasattr(e, 'response') else None, error=str(e), exc_info=True)
-        sentry_sdk.capture_exception(e)
+        for attempt in range(3):  # Retry up to 3 times
+            try:
+                response = _session.get(url, timeout=10)
+                response.raise_for_status()
+                image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
+                image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
+                if image is None or image.size < 1500:
+                    logger.warning("image_decode_failed", url=url, attempt=attempt+1)
+                    continue
+                logger.info("image_fetched", camera_id=camera_id, shape=image.shape)
+                return image
+            except _requests.exceptions.RequestException as e:
+                logger.error("fetch_attempt_failed", camera_id=camera_id, attempt=attempt+1, error=str(e))
+                time.sleep(2)
+        logger.error("all_fetch_attempts_failed", camera_id=camera_id)
         return None
     except Exception as e:
         logger.error("fetch_image_failed", camera_id=camera_id, error=str(e), exc_info=True)
@@ -988,6 +996,7 @@ def debug():
                 "process_memory_mb": round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 2)
             }
         except Exception as e:
+            logger.error("memory_info_error", error=str(e), exc_info=True)
             memory_info = str(e)
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -996,7 +1005,7 @@ def debug():
             "environment_variables": env_vars,
             "base_directory": os.environ.get('BASE_DIR', os.getcwd()),
             "files_in_base_directory": files_in_base_dir,
-            "storage_info": storage_info,
+            "storage": storage_info,
             "system_resources": memory_info,
             "cameras_parsed": len(cameras),
             "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
@@ -1013,11 +1022,11 @@ def debug():
 def force_load_models():
     try:
         load_success = load_models()
-        road_loaded = _road_model is not None
-        vehicle_loaded = _vehicle_model is not None
+        road_success = _road_model is not None
+        vehicle_success = _vehicle_model is not None
         status = {
             "load_attempt_success": load_success,
-            "models_loaded": {"road_model": road_loaded, "vehicle_model": vehicle_loaded},
+            "models_loaded": {"road_model": road_success, "vehicle_model": vehicle_success},
             "model_files": {
                 "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
                 "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
@@ -1044,7 +1053,7 @@ def debug_model():
             return jsonify({"error": "Models not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         road_success, road_error = False, None
         try:
-            test_input_tf = np.zeros((1, 128, 128, 3), dtype='float32')
+            test_input_tf = np.zeros((1, 128, 128, 3), dtype=np.float32)
             _road_model.predict(test_input_tf, verbose=0)
             road_success = True
         except Exception as e:
@@ -1130,4 +1139,4 @@ if __name__ == "__main__":
     manage_historical_densities()
     start_worker()
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
