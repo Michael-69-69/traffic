@@ -5,18 +5,16 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
-from urllib.parse import urlparse, parse_qs, unquote
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-import io
 import cv2
 import numpy as np
 import tensorflow as tf
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-import requests
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import io
 
 # Initialize Flask
 app = Flask(__name__)
@@ -32,7 +30,8 @@ CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET')
 REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
 FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 
-# File names for vehicle count data
+# File names for data
+DENSITIES_FILE = "densities.json"
 VEHICLE_COUNTS_FILE = "vehicle_counts.json"
 TODAY_VEHICLE_COUNTS_FILE = "today_vehicle_counts.json"
 YESTERDAY_VEHICLE_COUNTS_FILE = "yesterday_vehicle_counts.json"
@@ -127,95 +126,26 @@ def download_json_from_drive(filename):
         logger.error(f"Error downloading {filename} from Google Drive: {e}")
         return None
 
-# Camera websites list aligned with frontend
-camera_websites = [
-    {
-        'id': 'A',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lý Thái Tổ - Sư Vạn Hạnh'
-    },
-    {
-        'id': 'B',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': '3/2 – Cao Thắng'
-    },
-    {
-        'id': 'C',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Điện Biên Phủ - Cao Thắng'
-    },
-    {
-        'id': 'D',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Nguyễn Tri Phương 1'
-    },
-    {
-        'id': 'E',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Nguyễn Tri Phương'
-    },
-    {
-        'id': 'F',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lê Đại Hành 2'
-    },
-    {
-        'id': 'G',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lý Thái Tổ - Nguyễn Đình Chiểu'
-    },
-    {
-        'id': 'H',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Cộng Hòa 1'
-    },
-    {
-        'id': 'I',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Cộng Hòa'
-    },
-    {
-        'id': 'J',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Điện Biên Phủ - CMT8'
-    },
-    {
-        'id': 'K',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%29t%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A9&camMode=camera&videoUrl=https',
-        'title': 'Nút giao Công Trường Dân Chủ'
-    },
-    {
-        'id': 'L',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Nút giao Công Trường Dân Chủ 1'
-    }
+# Camera list (simulated for 12 cameras)
+cameras = [
+    ('A', 'Lý Thái Tổ - Sư Vạn Hạnh'),
+    ('B', '3/2 – Cao Thắng'),
+    ('C', 'Điện Biên Phủ - Cao Thắng'),
+    ('D', 'Ngã sáu Nguyễn Tri Phương 1'),
+    ('E', 'Ngã sáu Nguyễn Tri Phương'),
+    ('F', 'Lê Đại Hành 2'),
+    ('G', 'Lý Thái Tổ - Nguyễn Đình Chiểu'),
+    ('H', 'Ngã sáu Cộng Hòa 1'),
+    ('I', 'Ngã sáu Cộng Hòa'),
+    ('J', 'Điện Biên Phủ - CMT8'),
+    ('K', 'Nút giao Công Trường Dân Chủ'),
+    ('L', 'Nút giao Công Trường Dân Chủ 1')
 ]
 
-# Parse camera data from URLs
-def parse_camera_data():
-    cameras = []
-    camera_mapping = {}
-    for camera in camera_websites:
-        try:
-            camera_id = camera['id']
-            camera_location = camera['title']
-            camera_mapping[camera_id] = camera_location
-            cameras.append((camera_id, camera_location))
-            logger.info(f"Parsed camera {camera_id}: {camera_location}")
-        except Exception as e:
-            logger.error(f"Error parsing camera {camera}: {e}")
-    logger.info(f"Parsed cameras: {cameras}")
-    logger.info(f"Camera mapping: {camera_mapping}")
-    return cameras, camera_mapping
-
-# Generate cameras and mapping
-cameras, camera_mapping = parse_camera_data()
-CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?camId={camera_id}')
-
 # Lazy-load dependencies
-_tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _session = [None] * 9
-USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
-last_vehicle_count_update = None
+_tf, _cv2, _np, _torch, _transforms, _road_model, _vehicle_model = [None] * 7
+USE_MODELS = os.environ.get('USE_MODELS', 'true').lower() == 'true'
+last_update = None
 DEVICE = 'cpu'
 
 # Define MiniUNet architecture
@@ -252,26 +182,16 @@ class MiniUNet(nn.Module):
         return torch.sigmoid(self.final_conv(dec1))
 
 def load_dependencies():
-    global _tf, _cv2, _np, _requests, _torch, _transforms, _session
+    global _tf, _cv2, _np, _torch, _transforms
     if _tf is None:
         try:
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-            os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-            os.environ['TF_MEMORY_ALLOCATION'] = '256MB'
             import tensorflow as tf
             import cv2
             import numpy as np
-            import requests
             import torch
             import torchvision.transforms as transforms
-            _tf, _cv2, _np, _requests, _torch, _transforms = tf, cv2, np, requests, torch, transforms
-            physical_devices = _tf.config.list_physical_devices('GPU')
-            if physical_devices:
-                _tf.config.experimental.set_memory_growth(physical_devices[0], True)
-            _tf.config.threading.set_intra_op_parallelism_threads(1)
-            _tf.config.threading.set_inter_op_parallelism_threads(1)
-            _session = _requests.Session()
-            _session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"})
+            _tf, _cv2, _np, _torch, _transforms = tf, cv2, np, torch, transforms
             logger.info("Dependencies loaded successfully")
             return True
         except Exception as e:
@@ -280,14 +200,19 @@ def load_dependencies():
     return True
 
 def load_models():
-    global _vehicle_model
-    logger.info("Loading vehicle detection model...")
+    global _road_model, _vehicle_model
+    logger.info("Loading models...")
     if not load_dependencies():
-        logger.error("Failed to load dependencies - cannot load model")
+        logger.error("Failed to load dependencies - cannot load models")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
     vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
     try:
+        logger.info(f"Loading road model from {road_model_path}")
+        _road_model = _tf.keras.models.load_model(road_model_path)
+        logger.info("Road model loaded successfully")
+        
         logger.info(f"Loading vehicle model from {vehicle_model_path}")
         _vehicle_model = MiniUNet(in_channels=3, out_channels=1).to(DEVICE)
         checkpoint = _torch.load(vehicle_model_path, map_location=DEVICE)
@@ -296,18 +221,26 @@ def load_models():
         logger.info(f"Vehicle model loaded successfully. Trained for {checkpoint.get('epoch', 'N/A')+1} epochs")
         return True
     except Exception as e:
-        logger.error(f"Error loading vehicle model: {str(e)}")
+        logger.error(f"Error loading models: {str(e)}")
         return False
 
-def preprocess_image(img):
-    if not load_dependencies() or img is None:
+def preprocess_image_for_road(image):
+    if not load_dependencies() or image is None:
+        return None
+    IMG_HEIGHT, IMG_WIDTH = 128, 128
+    img_road = _cv2.resize(image, (IMG_WIDTH, IMG_HEIGHT)) / 255.0
+    img_road = _np.expand_dims(img_road, axis=0)
+    return img_road
+
+def preprocess_image_for_vehicle(image):
+    if not load_dependencies() or image is None:
         return None
     transform = _transforms.Compose([
         _transforms.ToPILImage(),
         _transforms.Resize((384, 384)),
         _transforms.ToTensor(),
     ])
-    img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
+    img_rgb = _cv2.cvtColor(image, _cv2.COLOR_BGR2RGB)
     img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
     return img_vehicle
 
@@ -406,14 +339,81 @@ def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=500):
         total_vehicles += vehicles_in_blob
     return int(total_vehicles), int(typical_vehicle_size)
 
-def analyze_image(image):
-    if not load_dependencies() or image is None:
+def load_sample_image():
+    base_directory = os.environ.get('BASE_DIR', os.getcwd())
+    image_path = os.path.join(base_directory, "sample_traffic_image.jpg")
+    try:
+        if not os.path.exists(image_path):
+            logger.warning(f"Sample image not found at {image_path}, using fallback logic")
+            return None
+        image = _cv2.imread(image_path)
+        if image is None:
+            logger.error(f"Failed to load sample image from {image_path}")
+            return None
+        logger.info(f"Loaded sample image from {image_path}")
+        return image
+    except Exception as e:
+        logger.error(f"Error loading sample image: {e}")
+        return None
+
+def analyze_image_for_density(image):
+    if not load_dependencies() or image is None or _road_model is None or _vehicle_model is None:
+        logger.error("Dependencies or models not loaded, or image is None")
+        return {"density_percentage": 0.0, "road_pixels": 0, "vehicle_pixels_on_road": 0}
+    try:
+        # Road segmentation
+        img_road = preprocess_image_for_road(image)
+        if img_road is None:
+            return {"density_percentage": 0.0, "road_pixels": 0, "vehicle_pixels_on_road": 0}
+        road_pred = _road_model.predict(img_road, verbose=0)
+        road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
+        mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
+        
+        # Refine road mask
+        contours, _ = _cv2.findContours(mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
+        refined_road_mask = mask_resized
+        if contours:
+            largest_contour = max(contours, key=_cv2.contourArea)
+            hull = _cv2.convexHull(largest_contour)
+            refined_road_mask = np.zeros_like(mask_resized, dtype=np.uint8)
+            _cv2.fillPoly(refined_road_mask, [hull], 255)
+        
+        road_pixels = np.count_nonzero(refined_road_mask)
+        
+        # Vehicle detection
+        img_vehicle = preprocess_image_for_vehicle(image)
+        if img_vehicle is None:
+            return {"density_percentage": 0.0, "road_pixels": road_pixels, "vehicle_pixels_on_road": 0}
+        with _torch.no_grad():
+            vehicle_pred = _vehicle_model(img_vehicle)
+        vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
+        vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
+        binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
+        
+        # Calculate vehicles on road
+        road_binary = (refined_road_mask > 0).astype(np.uint8)
+        vehicles_on_road = np.logical_and(binary_vehicle_mask, road_binary).astype(np.uint8)
+        vehicle_pixels_on_road = np.count_nonzero(vehicles_on_road)
+        
+        # Density calculation
+        density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
+        
+        logger.info(f"Density analysis: {density_percentage:.2f}%")
+        return {
+            "density_percentage": density_percentage,
+            "road_pixels": road_pixels,
+            "vehicle_pixels_on_road": vehicle_pixels_on_road
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing image for density: {e}")
+        return {"density_percentage": 0.0, "road_pixels": 0, "vehicle_pixels_on_road": 0}
+
+def analyze_image_for_vehicles(image):
+    if not load_dependencies() or image is None or _vehicle_model is None:
+        logger.error("Dependencies or vehicle model not loaded, or image is None")
         return {"vehicle_count": 0, "avg_vehicle_size": 0}
     try:
-        if _vehicle_model is None:
-            logger.warning("Vehicle model not loaded, using fallback values")
-            return {"vehicle_count": 0, "avg_vehicle_size": 0}
-        img_vehicle = preprocess_image(image)
+        img_vehicle = preprocess_image_for_vehicle(image)
         if img_vehicle is None:
             return {"vehicle_count": 0, "avg_vehicle_size": 0}
         with _torch.no_grad():
@@ -421,20 +421,17 @@ def analyze_image(image):
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
         binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
-        kernel_open = _np.ones((2, 2), np.uint8)
-        kernel_close = _np.ones((5, 5), np.uint8)
+        
+        # Clean up noise
+        kernel_open = np.ones((2, 2), np.uint8)
+        kernel_close = np.ones((5, 5), np.uint8)
         vehicles_cleaned = _cv2.morphologyEx(binary_vehicle_mask, _cv2.MORPH_OPEN, kernel_open, iterations=1)
         vehicles_cleaned = _cv2.morphologyEx(vehicles_cleaned, _cv2.MORPH_CLOSE, kernel_close, iterations=1)
-        num_labels, labels, stats, centroids = _cv2.connectedComponentsWithStats(
-            vehicles_cleaned, connectivity=8
-        )
-        blob_sizes = []
-        min_reasonable_blob = 500
-        max_reasonable_blob = 8000
-        for i in range(1, num_labels):
-            blob_size = stats[i, _cv2.CC_STAT_AREA]
-            if min_reasonable_blob <= blob_size <= max_reasonable_blob:
-                blob_sizes.append(blob_size)
+        
+        # Connected components
+        num_labels, labels, stats, _ = _cv2.connectedComponentsWithStats(vehicles_cleaned, connectivity=8)
+        blob_sizes = [stats[i, _cv2.CC_STAT_AREA] for i in range(1, num_labels) if 500 <= stats[i, _cv2.CC_STAT_AREA] <= 8000]
+        
         if blob_sizes:
             method1_count, method1_unit = estimate_vehicle_count_from_blobs(blob_sizes)
             method2_count, method2_unit = estimate_vehicles_statistical_clustering(blob_sizes)
@@ -445,13 +442,14 @@ def analyze_image(image):
         else:
             estimated_vehicle_count = 0
             avg_vehicle_size = 0
-        logger.info(f"Vehicle count: {estimated_vehicle_count}")
+        
+        logger.info(f"Vehicle count: {estimated_vehicle_count}, Avg size: {avg_vehicle_size}")
         return {
             "vehicle_count": estimated_vehicle_count,
             "avg_vehicle_size": avg_vehicle_size
         }
     except Exception as e:
-        logger.error(f"Error analyzing image: {e}")
+        logger.error(f"Error analyzing image for vehicles: {e}")
         return {"vehicle_count": 0, "avg_vehicle_size": 0}
 
 def check_new_day():
@@ -478,7 +476,7 @@ def update_critical_vehicle_counts(vehicle_counts_data):
     try:
         critical_vehicle_counts = download_json_from_drive(CRITICAL_VEHICLE_COUNTS_FILE) or {}
         counts_by_time = vehicle_counts_data.get('counts_by_time', {})
-        for camera_code in [camera['id'] for camera in camera_websites]:
+        for camera_code, _ in cameras:
             max_vehicle_count = 0
             for timestamp, cameras_data in counts_by_time.items():
                 if camera_code in cameras_data:
@@ -496,7 +494,7 @@ def update_day_before_yesterday_critical_vehicle_counts(vehicle_counts_data):
     try:
         critical_vehicle_counts = download_json_from_drive(DAY_BEFORE_YESTERDAY_CRITICAL_VEHICLE_COUNTS_FILE) or {}
         counts_by_time = vehicle_counts_data.get('counts_by_time', {})
-        for camera_code in [camera['id'] for camera in camera_websites]:
+        for camera_code, _ in cameras:
             max_vehicle_count = 0
             for timestamp, cameras_data in counts_by_time.items():
                 if camera_code in cameras_data:
@@ -522,53 +520,9 @@ def manage_historical_vehicle_counts():
     for file_name in [CRITICAL_VEHICLE_COUNTS_FILE, DAY_BEFORE_YESTERDAY_CRITICAL_VEHICLE_COUNTS_FILE]:
         critical_vehicle_counts = download_json_from_drive(file_name)
         if not critical_vehicle_counts:
-            sample_critical_vehicle_counts = {camera['id']: 0 for camera in camera_websites}
+            sample_critical_vehicle_counts = {camera_id: 0 for camera_id, _ in cameras}
             upload_json_to_drive(file_name, sample_critical_vehicle_counts)
     return today_vehicle_counts
-
-def fetch_camera_image(camera_id):
-    if not load_dependencies():
-        return None
-    try:
-        global _session
-        if _session is None:
-            _session = _requests.Session()
-        _session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Referer": "https://giaothong.hochiminhcity.gov.vn/"
-        })
-        _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
-        # Extract camId from URL
-        cam_id = None
-        for camera in camera_websites:
-            if camera['id'] == camera_id:
-                parsed_url = urlparse(camera['url'])
-                query_params = parse_qs(parsed_url.query)
-                cam_id = query_params.get('camId', [''])[0]
-                break
-        if not cam_id:
-            logger.error(f"No camId found for camera {camera_id}")
-            return None
-        url = CAMERA_URL_TEMPLATE.format(camera_id=cam_id)
-        logger.info(f"Fetching image from {url}")
-        response = _session.get(url, timeout=10)
-        response.raise_for_status()
-        image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
-        image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-        if image is None:
-            logger.warning(f"Failed to decode image from {url}")
-            return None
-        return image
-    except _requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error fetching camera image for {camera_id}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Error fetching camera image for {camera_id}: {e}")
-        return None
 
 def store_today_vehicle_count(timestamp_str, camera_code, count_data):
     try:
@@ -582,66 +536,77 @@ def store_today_vehicle_count(timestamp_str, camera_code, count_data):
     except Exception as e:
         logger.error(f"Error storing today's vehicle count: {e}")
 
-def fetch_and_process_vehicle_counts():
-    global last_vehicle_count_update
+def process_traffic_data():
+    global last_update
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    last_vehicle_count_update = datetime.now()
-    results = {"timestamp": timestamp_str, "cameras": {}}
+    last_update = datetime.now()
+    
+    # Load sample image
+    image = load_sample_image()
+    if image is None:
+        logger.error("No sample image available, using fallback values")
+        density_results = {"density_percentage": 0.0, "road_pixels": 0, "vehicle_pixels_on_road": 0}
+        vehicle_results = {"vehicle_count": 0, "avg_vehicle_size": 0}
+    else:
+        density_results = analyze_image_for_density(image)
+        vehicle_results = analyze_image_for_vehicles(image)
+    
+    # Simulate per-camera data (same results for all cameras due to single sample image)
+    density_data = {"timestamp": timestamp_str, "cameras": {}}
+    vehicle_data = {"timestamp": timestamp_str, "cameras": {}}
     success_count, failure_count = 0, 0
+    
     for camera_id, camera_name in cameras:
         try:
-            logger.info(f"Processing camera {camera_name} (ID: {camera_id}) for vehicle counts")
-            image = fetch_camera_image(camera_id)
-            count_data = {
+            density_data["cameras"][camera_id] = {
                 "name": camera_name,
-                "vehicle_count": 0,
-                "avg_vehicle_size": 0,
+                "density_percentage": density_results["density_percentage"],
+                "road_pixels": density_results["road_pixels"],
+                "vehicle_pixels_on_road": density_results["vehicle_pixels_on_road"],
                 "timestamp": timestamp_str
             }
-            if image is None:
-                failure_count += 1
-                logger.warning(f"Image fetch failed for {camera_name} (ID: {camera_id})")
-            else:
-                success_count += 1
-                logger.info(f"Successfully fetched image for {camera_name}")
-                analysis_result = analyze_image(image)
-                count_data.update({
-                    "vehicle_count": analysis_result["vehicle_count"],
-                    "avg_vehicle_size": analysis_result["avg_vehicle_size"]
-                })
-            results["cameras"][camera_id] = count_data
-            store_today_vehicle_count(timestamp_str, camera_id, count_data)
-            logger.info(f"Processed camera {camera_name}: vehicle_count={count_data['vehicle_count']}")
+            vehicle_data["cameras"][camera_id] = {
+                "name": camera_name,
+                "vehicle_count": vehicle_results["vehicle_count"],
+                "avg_vehicle_size": vehicle_results["avg_vehicle_size"],
+                "timestamp": timestamp_str
+            }
+            store_today_vehicle_count(timestamp_str, camera_id, vehicle_data["cameras"][camera_id])
+            success_count += 1
+            logger.info(f"Processed camera {camera_name}: density={density_results['density_percentage']:.2f}%, vehicles={vehicle_results['vehicle_count']}")
         except Exception as e:
             failure_count += 1
-            logger.error(f"Error processing camera {camera_name} (ID: {camera_id}) for vehicle counts: {e}")
-            results["cameras"][camera_id] = count_data
-            store_today_vehicle_count(timestamp_str, camera_id, count_data)
-    logger.info(f"Vehicle count processing complete. Success: {success_count}, Failure: {failure_count}")
+            logger.error(f"Error processing camera {camera_name}: {e}")
+    
+    logger.info(f"Processing complete. Success: {success_count}, Failure: {failure_count}")
+    
+    # Save to Google Drive
     try:
-        upload_json_to_drive(VEHICLE_COUNTS_FILE, results)
+        upload_json_to_drive(DENSITIES_FILE, density_data)
+        upload_json_to_drive(VEHICLE_COUNTS_FILE, vehicle_data)
     except Exception as e:
-        logger.error(f"Error saving vehicle_counts.json to Google Drive: {e}")
-    return results
+        logger.error(f"Error saving to Google Drive: {e}")
+    
+    return density_data, vehicle_data
 
-def vehicle_count_worker():
-    logger.info("Vehicle count worker initialized - running every 30 seconds")
+def traffic_worker():
+    logger.info("Traffic worker initialized - running every 30 seconds")
     try:
-        logger.info("Starting initial vehicle count calculation")
+        logger.info("Starting initial traffic calculation")
         manage_historical_vehicle_counts()
-        fetch_and_process_vehicle_counts()
-        logger.info("Initial vehicle count calculation completed")
+        process_traffic_data()
+        logger.info("Initial traffic calculation completed")
         while True:
             try:
-                logger.info("Starting vehicle count processing cycle (30-second interval)")
-                fetch_and_process_vehicle_counts()
-                logger.info("Vehicle count processing cycle completed")
+                logger.info("Starting traffic processing cycle")
+                process_traffic_data()
+                logger.info("Traffic processing cycle completed")
                 time.sleep(30)
             except Exception as e:
-                logger.error(f"Error in vehicle count worker cycle: {e}")
+                logger.error(f"Error in traffic worker cycle: {e}")
                 time.sleep(10)
     except Exception as e:
-        logger.error(f"Critical error in vehicle count worker: {e}")
+        logger.error(f"Critical error in traffic worker: {e}")
 
 def start_worker():
     try:
@@ -651,10 +616,10 @@ def start_worker():
             logger.info("Models loaded successfully")
         else:
             logger.error("Failed to load models")
-        logger.info("Starting vehicle count worker thread...")
-        vehicle_count_thread = threading.Thread(target=vehicle_count_worker, daemon=True)
-        vehicle_count_thread.start()
-        logger.info("Vehicle count worker thread started")
+        logger.info("Starting traffic worker thread...")
+        traffic_thread = threading.Thread(target=traffic_worker, daemon=True)
+        traffic_thread.start()
+        logger.info("Traffic worker thread started")
     except Exception as e:
         logger.error(f"Failed to start worker: {str(e)}")
 
@@ -683,28 +648,29 @@ def index():
         "version": "1.0",
         "message": "Traffic Analysis Service is operational",
         "using_models": USE_MODELS,
-        "last_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None
+        "last_update": last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else None
     })
+
 @app.route('/live-densities')
 def get_live_densities():
     try:
-        density = download_json_from_drive(OUTPUT_JSON_FILE)
-        if not density:
+        densities_data = download_json_from_drive(DENSITIES_FILE)
+        if not density_data:
             return jsonify({
                 "error": "No density data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
-        density["update_interval"] = "30 seconds"
-        if last_density_update:
-            next_update = last_density_update + timedelta(seconds=30)
+        density_data["last_update"] = last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else None
+        density_data["update_interval"] = "30 seconds"
+        if last_update:
+            next_update = last_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
-            density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
-        return jsonify(density)
+            density_data["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+        return jsonify(density_data)
     except Exception as e:
-        logger.error(f"Error reading live density: {e}")
+        logger.error(f"Error reading live densities: {e}")
         return jsonify({"error": str(e)}), 500
-        
+
 @app.route('/live-vehicleCounts')
 def get_live_vehicle_counts():
     try:
@@ -714,10 +680,10 @@ def get_live_vehicle_counts():
                 "error": "No vehicle count data available yet",
                 "message": "Please wait for the first calculation cycle"
             }), 404
-        vehicle_counts["last_update"] = last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None
+        vehicle_counts["last_update"] = last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else None
         vehicle_counts["update_interval"] = "30 seconds"
-        if last_vehicle_count_update:
-            next_update = last_vehicle_count_update + timedelta(seconds=30)
+        if last_update:
+            next_update = last_update + timedelta(seconds=30)
             time_until_next = next_update - datetime.now()
             vehicle_counts["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
         return jsonify(vehicle_counts)
@@ -782,7 +748,7 @@ def get_critical_vehicle_counts():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error reading critical vehicle counts: {e}")
-        return jsonify({"error": "str(e)"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/day_before_yesterday-critical-vehicleCounts')
 def get_day_before_yesterday_critical_vehicle_counts():
@@ -815,6 +781,7 @@ def status():
 @app.route('/health')
 def health_check():
     try:
+        densities_exists = bool(get_file_id(DENSITIES_FILE))
         vehicle_counts_exists = bool(get_file_id(VEHICLE_COUNTS_FILE))
         today_vehicle_counts_exists = bool(get_file_id(TODAY_VEHICLE_COUNTS_FILE))
         yesterday_vehicle_counts_exists = bool(get_file_id(YESTERDAY_VEHICLE_COUNTS_FILE))
@@ -826,15 +793,16 @@ def health_check():
             "storage": {
                 "backend": "Google Drive",
                 "folder_id": FOLDER_ID,
+                "densities_exists": density_exists,
                 "vehicle_counts_exists": vehicle_counts_exists,
                 "today_vehicle_counts_exists": today_vehicle_counts_exists,
                 "yesterday_vehicle_counts_exists": yesterday_vehicle_counts_exists,
                 "day_before_yesterday_counts_exists": day_before_yesterday_exists,
-                "critical_vehicle_counts_exists": critical_vehicle,
+                "critical_vehicle_counts_exists": critical_vehicle_exists,
                 "day_before_yesterday_critical_exists": day_before_critical_exists
             },
             "using_models": USE_MODELS,
-            "last_vehicle_count_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None,
+            "last_update": last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else None,
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
@@ -844,120 +812,75 @@ def health_check():
         }), 500
 
 @app.route('/refresh')
-def refresh_vehicle_counts():
+def refresh_traffic_data():
     try:
-        vehicle_counts_result = fetch_and_process_vehicle_counts()
+        density_data, vehicle_data = process_traffic_data()
         return jsonify({
             "status": "success",
-            "message": "Vehicle counts refreshed successfully",
-            "vehicle_count_timestamp": vehicle_counts_result["timestamp"]
+            "message": "Traffic data refreshed successfully",
+            "density_timestamp": density_data["timestamp"],
+            "vehicle_count_timestamp": vehicle_data["timestamp"]
         })
     except Exception as e:
         return jsonify({
             "status": "error",
-            "message": f"Failed to refresh vehicle counts: {str(e)}"
+            "message": f"Failed to refresh traffic data: {str(e)}"
         }), 500
 
 @app.route('/debug')
 def debug():
     try:
         model_info = {
-            "filtered_model_cpu": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))},
+            "road_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "unet_road_segmentation (Better).keras"))},
+            "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))}
         }
         env_vars = {
-            "USE_MODELS_RAW": os.environ.get('USE_MODELS', 'not set'),
-            "USE_MODELS_PROCESSED": USE_MODELS,
+            "USE_MODELS": USE_MODELS,
             "BASE_DIR": os.environ.get('BASE_DIR', 'not set'),
-            "TF_MEMORY_ALLOCATION": os.environ.get('TF_MEMORY_ALLOCATION', 'not set'),
-            "TF_FORCE_GPU_ALLOW_GROWTH": os.environ.get('TF_FORCE_GPU_ALLOW_GROWTH', 'not set'),
-            "PORT": os.environ.get('PORT', 'not set'),
-            "CAMERA_URL_TEMPLATE": os.environ.get('CAMERA_URL_TEMPLATE', 'not set'),
             "GOOGLE_DRIVE_FOLDER_ID": FOLDER_ID
         }
         storage_info = {
             "backend": "Google Drive",
             "folder_id": FOLDER_ID,
-            "vehicle_counts_exists": True,
-            "today_vehicle_counts_exists": True,
-            "yesterday_downloads_exists": False,
-            "day_before_yesterday_exists": True,
-            "critical_vehicle_counts_exists": False,
-            "day_before_yesterday_critical_exists": True
+            "densities_exists": bool(get_file_id(DENSITIES_FILE)),
+            "vehicle_counts_exists": bool(get_file_id(VEHICLE_COUNTS_FILE)),
+            "today_vehicle_counts_exists": bool(get_file_id(TODAY_VEHICLE_COUNTS_FILE))
         }
-        try:
-            files_in_base_dir = os.listdir(os.environ.get('BASE_DIR', os.getcwd()))
-        except Exception as e:
-            files_in_base_dir = f"Error listing files: {str(e)}"
         model_load_status = {
+            "road_model_loaded": _road_model is not None,
             "vehicle_model_loaded": _vehicle_model is not None,
-            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None and _transforms is not None
+            "dependencies_loaded": all(x is not None for x in [_tf, _cv2, _np, _torch, _transforms])
         }
-        try:
-            import psutil
-            memory_info = {
-                "total_memory_mb": round(psutil.virtual_memory().total / (1024 * 1024), 2),
-                "available_memory_mb": round(psutil.virtual_memory().available / (1024 * 1024), 2),
-                "used_memory_percent": psutil.virtual_memory().percent,
-                "cpu_percent": psutil.cpu_percent(interval=0.1),
-                "process_memory_mb": round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 2)
-            }
-        except Exception as e:
-            memory_info = f"Error getting system resources: {str(e)}"
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "model_files": model_info,
             "model_load_status": model_load_status,
             "environment_variables": env_vars,
-            "base_directory": os.environ.get('BASE_DIR', os.getcwd()),
-            "files_in_base_directory": files_in_base_dir,
             "storage_info": storage_info,
             "cameras": len(cameras),
-            "last_vehicle_count_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None
+            "last_update": last_update.strftime('%Y-%m-%d %H:%M:%S') if last_update else None
         })
     except Exception as e:
         logger.error(f"Error in debug endpoint: {e}")
-        return jsonify({
-            "error": "Debug information collection failed",
-            "details": str(e),
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }), 500
-
-@app.route('/load-models')
-def force_load_models():
-    try:
-        load_success = load_models()
-        vehicle_loaded = _vehicle_model is not None
-        status = {
-            "load_attempt_success": load_success,
-            "models_loaded": {"vehicle_model": vehicle_loaded},
-            "model_files": {
-                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), '.filtered_model_cpu.pth'))
-            }
-        },
-            "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
-            "time": datetime.now().nowstrftime('%Y-%m-%d %H:%M:%S')
-        }
-        return jsonify(status)
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": error_details,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/debug-model')
 def debug_model():
     try:
         if not load_dependencies():
-            return jsonify({"error": "Dependencies not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        if _vehicle_model is None:
-            return jsonify({"error": "Vehicle model not loaded", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+            return jsonify({"error": "Dependencies not loaded"}), 500
+        if _road_model is None or _vehicle_model is None:
+            return jsonify({"error": "Models not loaded"}), 500
+        road_success, road_error = False, None
         vehicle_success, vehicle_error = False, None
         try:
-            test_input_torch = _np.zeros((1, 3, 384, 384), dtype=torch.float32).to(DEVICE)
+            test_input_tf = np.zeros((1, 128, 128, 3), dtype=np.float32)
+            _road_model.predict(test_input_tf, verbose=0)
+            road_success = True
+        except Exception as e:
+            road_error = str(e)
+        try:
+            test_input_torch = torch.zeros((1, 3, 384, 384), dtype=torch.float32).to(DEVICE)
             with _torch.no_grad():
                 _vehicle_model(test_input_torch)
             vehicle_success = True
@@ -965,35 +888,14 @@ def debug_model():
             vehicle_error = str(e)
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "models_loaded": {"vehicle_model": _vehicle_model is not None},
+            "models_loaded": {"road_model": _road_model is not None, "vehicle_model": _vehicle_model is not None},
             "test_prediction": {
+                "road_test": {"success": road_success, "error": road_error},
                 "vehicle_test": {"success": vehicle_success, "error": vehicle_error}
             }
         })
     except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-
-@app.route('/camera-status')
-def check_camera_status():
-    try:
-        results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
-        if not load_dependencies():
-            return jsonify({"error": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-        for camera_id, camera_name in cameras:
-            try:
-                logger.info(f"Checking camera {camera_name} (ID: {camera_id})")
-                image = fetch_camera_image(camera_id)
-                if image is None:
-                    results["cameras"][camera_id] = {"name": camera_name, "status": "failed", "error": "Failed to fetch image"}
-                elif image.size > 1000:
-                    results["cameras"][camera_id] = {"name": camera_name, "status": "success", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
-                else:
-                    results["cameras"][camera_id] = {"name": camera_name, "status": "error", "error": "Retrieved image is too small or invalid"}
-            except Exception as e:
-                results["cameras"][camera_id] = {"name": camera_name, "status": "error", "error": str(e)}
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     init_google_drive()
