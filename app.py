@@ -204,7 +204,8 @@ def parse_camera_data():
 
 # Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
-CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?camId={camera_id}')
+# Update CAMERA_URL_TEMPLATE to use the simplified format for all cameras
+CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camera_id}&bg=black&w=300&h=230')
 
 # Lazy-load dependencies
 _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _session = [None] * 9
@@ -574,36 +575,47 @@ def fetch_camera_image(camera_id):
             _session = _requests.Session()
         _session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept": "image/jpeg,image/png,image/*,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Referer": "https://giaothong.hochiminhcity.gov.vn/"
         })
+        # Warm-up request to establish session
         _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
-        url = CAMERA_URL_TEMPLATE.format(camera_id=camera_id)
-        logger.info(f"Fetching image from {url}")
-        response = _session.get(url, timeout=10)
-        response.raise_for_status()
-        image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
-        image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-        if image is None:
-            logger.warning(f"Failed to decode image from {url}")
+        # Find the camera's camId from camera_websites
+        camera = next((c for c in camera_websites if c['id'] == camera_id), None)
+        if not camera:
+            logger.error(f"Camera {camera_id} not found in camera_websites")
             return None
-        return image
-    except _requests.exceptions.HTTPError as e:
-        if e.response.status_code == 403:
-            logger.error(f"403 Forbidden for {url}: Check API key or server permissions")
+        cam_id = camera['url'].split('camId=')[1].split('&')[0]
+        # Construct URL using the camera's camId
+        url = CAMERA_URL_TEMPLATE.format(camera_id=cam_id)
+        logger.info(f"Fetching image from {url}")
+        for attempt in range(3):
             try:
-                logger.error(f"Response headers: {e.response.headers}")
-                logger.error(f"Response content: {e.response.text[:500]}")
-            except:
-                pass
-        else:
-            logger.error(f"HTTP error fetching camera image for {camera_id}: {e}")
+                response = _session.get(url, timeout=10)
+                response.raise_for_status()
+                if response.content and len(response.content) > 100:
+                    image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
+                    image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
+                    if image is not None and image.size > 0:
+                        logger.info(f"Successfully fetched and decoded image for camera {camera_id}")
+                        return image
+                    logger.warning(f"Failed to decode image from {url} (attempt {attempt+1}/3)")
+                else:
+                    logger.warning(f"Empty or invalid response from {url} (attempt {attempt+1}/3)")
+            except _requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP error for {url}: {e} (attempt {attempt+1}/3)")
+                if e.response.status_code == 403:
+                    logger.error(f"403 Forbidden for {url}: Response headers: {e.response.headers}")
+            except Exception as e:
+                logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
+            time.sleep(1)
+        logger.error(f"Failed to fetch valid image for {camera_id} after 3 attempts")
         return None
     except Exception as e:
-        logger.error(f"Error fetching camera image for {camera_id}: {e}")
+        logger.error(f"Critical error fetching camera image for {camera_id}: {e}")
         return None
 
 def fetch_and_process_densities():
@@ -629,13 +641,23 @@ def fetch_and_process_densities():
             if image is None:
                 failure_count += 1
                 logger.warning(f"Image fetch failed for {camera_name} (ID: {camera_id})")
-                density_data["density"] = round(_np.random.uniform(10.0, 90.0), 1)
+                results["cameras"][camera_id] = {
+                    "name": camera_name,
+                    "density": 0.0,
+                    "vehicle_count": 0,
+                    "avg_vehicle_size": 0,
+                    "density_metric": 0.0,
+                    "estimated_speed": 0.0,
+                    "traffic_level": "No Image",
+                    "timestamp": timestamp_str,
+                    "error": "Failed to fetch image"
+                }
             else:
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
                 analysis_result = analyze_image(image)
                 density_data.update(analysis_result)
-            results["cameras"][camera_id] = density_data
+                results["cameras"][camera_id] = density_data
             logger.info(f"Processed camera {camera_name}: density={density_data['density']}, vehicles={density_data['vehicle_count']}")
         except Exception as e:
             failure_count += 1
