@@ -588,7 +588,8 @@ def fetch_camera_image(camera_id):
             logger.info(f"Warm-up request successful: {warmup_response.status_code}")
             logger.debug(f"Warm-up cookies: {_session.cookies.get_dict()}")
         except Exception as e:
-            logger.warning(f"Warm-up request failed: {e}")
+            logger.error(f"Warm-up request failed: {e}")
+            return None
 
         # Find the camera's camId and videoUrl from camera_websites
         camera = next((c for c in camera_websites if c['id'] == camera_id), None)
@@ -628,7 +629,7 @@ def fetch_camera_image(camera_id):
                     logger.error(f"Response content: {e.response.text[:500]}")
             except Exception as e:
                 logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
-            time.sleep(2)  # Increased delay between retries
+            time.sleep(2)  # Wait 2 seconds between retries
 
         # Fallback to video URL if available
         if video_url:
