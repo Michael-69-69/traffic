@@ -135,44 +135,90 @@ default_params = {
     "h": 230
 }
 
-# Camera websites list
+# Camera websites list aligned with frontend
 camera_websites = [
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-    'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8'
+    {
+        'id': 'A',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Lý Thái Tổ - Sư Vạn Hạnh'
+    },
+    {
+        'id': 'B',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': '3/2 – Cao Thắng'
+    },
+    {
+        'id': 'C',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Điện Biên Phủ - Cao Thắng'
+    },
+    {
+        'id': 'D',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Ngã sáu Nguyễn Tri Phương 1'
+    },
+    {
+        'id': 'E',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Ngã sáu Nguyễn Tri Phương'
+    },
+    {
+        'id': 'F',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Lê Đại Hành 2'
+    },
+    {
+        'id': 'G',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Lý Thái Tổ - Nguyễn Đình Chiểu'
+    },
+    {
+        'id': 'H',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Ngã sáu Cộng Hòa 1'
+    },
+    {
+        'id': 'I',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Ngã sáu Cộng Hòa'
+    },
+    {
+        'id': 'J',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Điện Biên Phủ - CMT8'
+    },
+    {
+        'id': 'K',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Nút giao Công Trường Dân Chủ'
+    },
+    {
+        'id': 'L',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'title': 'Nút giao Công Trường Dân Chủ 1'
+    }
 ]
 
 # Parse camera data from URLs
 def parse_camera_data():
     cameras = []
     camera_mapping = {}
-    for idx, url in enumerate(camera_websites):
+    for idx, camera in enumerate(camera_websites):
         try:
-            parsed_url = urlparse(url)
-            query_params = parse_qs(parsed_url.query)
-            camera_id = query_params.get('camId', [''])[0]
-            camera_location = unquote(query_params.get('camLocation', [''])[0])
-            if camera_id and camera_location:
-                camera_code = chr(65 + idx)
-                cameras.append((camera_id, camera_location))
-                camera_mapping[camera_location] = camera_code
-                logger.info(f"Parsed camera {camera_code}: {camera_location} (ID: {camera_id})")
+            camera_id = camera['id']
+            camera_location = camera['title']
+            camera_mapping[camera_id] = camera_location
+            cameras.append((camera_id, camera_location))
+            logger.info(f"Parsed camera {camera_id}: {camera_location}")
         except Exception as e:
-            logger.error(f"Error parsing camera URL {url}: {e}")
+            logger.error(f"Error parsing camera {camera}: {e}")
+    logger.info(f"Parsed cameras: {cameras}")
+    logger.info(f"Camera mapping: {camera_mapping}")
     return cameras, camera_mapping
 
 # Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
-CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx')
+CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?camId={camera_id}')
 
 # Lazy-load dependencies
 _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _session = [None] * 9
@@ -541,7 +587,7 @@ def update_critical_densities(densities_data):
     try:
         critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE) or {}
         density_by_time = densities_data.get('densities_by_time', {})
-        for camera_code in camera_mapping.values():
+        for camera_code in [camera['id'] for camera in camera_websites]:
             max_density = 0.0
             for timestamp, cameras_data in density_by_time.items():
                 if camera_code in cameras_data:
@@ -566,7 +612,7 @@ def manage_historical_densities():
         upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
     critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
     if not critical_densities:
-        sample_critical_densities = {code: 80.0 for code in camera_mapping.values()}
+        sample_critical_densities = {camera['id']: 80.0 for camera in camera_websites}
         upload_json_to_drive(CRITICAL_DENSITIES_FILE, sample_critical_densities)
     return today_densities
 
@@ -631,12 +677,18 @@ def fetch_and_process_densities():
     success_count, failure_count = 0, 0
     for camera_id, camera_name in cameras:
         try:
-            logger.info(f"Processing camera {camera_name}")
-            camera_code = camera_mapping.get(camera_name, camera_name)
+            logger.info(f"Processing camera {camera_name} (ID: {camera_id})")
             image = fetch_camera_image(camera_id)
+            density_data = {
+                "name": camera_name,
+                "density": 0.0,
+                "vehicle_count": 0,
+                "avg_vehicle_size": 0,
+                "timestamp": timestamp_str
+            }
             if image is None:
                 failure_count += 1
-                logger.warning(f"Using simulated data for {camera_name} due to image fetch failure")
+                logger.warning(f"Image fetch failed for {camera_name} (ID: {camera_id})")
                 density = round(_np.random.uniform(10.0, 90.0), 1)
                 vehicle_count = 0
                 avg_vehicle_size = 0
@@ -647,33 +699,30 @@ def fetch_and_process_densities():
                 density = analysis_result["density"]
                 vehicle_count = analysis_result["vehicle_count"]
                 avg_vehicle_size = analysis_result["avg_vehicle_size"]
-            density_data = {
-                "name": camera_name,
+            density_data.update({
                 "density": density,
                 "vehicle_count": vehicle_count,
-                "avg_vehicle_size": avg_vehicle_size,
-                "timestamp": timestamp_str
-            }
-            results["cameras"][camera_code] = density_data
-            store_today_density(timestamp_str, camera_code, density_data)
+                "avg_vehicle_size": avg_vehicle_size
+            })
+            results["cameras"][camera_id] = density_data
+            store_today_density(timestamp_str, camera_id, density_data)
             logger.info(f"Processed camera {camera_name}: density={density}, vehicle_count={vehicle_count}")
         except Exception as e:
-            logger.error(f"Error processing camera {camera_name}: {e}")
             failure_count += 1
-            density_data = {
+            logger.error(f"Error processing camera {camera_name} (ID: {camera_id}): {e}")
+            results["cameras"][camera_id] = {
                 "name": camera_name,
                 "density": 0.0,
                 "vehicle_count": 0,
                 "avg_vehicle_size": 0,
                 "timestamp": timestamp_str
             }
-            results["cameras"][camera_mapping.get(camera_name, camera_name)] = density_data
-            store_today_density(timestamp_str, camera_mapping.get(camera_name, camera_name), density_data)
+            store_today_density(timestamp_str, camera_id, results["cameras"][camera_id])
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(OUTPUT_JSON_FILE, results)
     except Exception as e:
-        logger.error(f"Error saving densities.json to Google Drive: {e}")
+        logger.error(f"Error saving density.json to Google Drive: {e}")
     return results
 
 def fetch_and_process_vehicle_counts():
@@ -684,38 +733,31 @@ def fetch_and_process_vehicle_counts():
     success_count, failure_count = 0, 0
     for camera_id, camera_name in cameras:
         try:
-            logger.info(f"Processing camera {camera_name} for vehicle counts")
-            camera_code = camera_mapping.get(camera_name, camera_name)
+            logger.info(f"Processing camera {camera_name} (ID: {camera_id}) for vehicle counts")
             image = fetch_camera_image(camera_id)
-            if image is None:
-                failure_count += 1
-                logger.warning(f"Using fallback data for {camera_name} due to image fetch failure")
-                vehicle_count = 0
-                avg_vehicle_size = 0
-            else:
-                success_count += 1
-                logger.info(f"Successfully fetched image for {camera_name}")
-                analysis_result = analyze_image(image)
-                vehicle_count = analysis_result["vehicle_count"]
-                avg_vehicle_size = analysis_result["avg_vehicle_size"]
-            count_data = {
-                "name": camera_name,
-                "vehicle_count": vehicle_count,
-                "avg_vehicle_size": avg_vehicle_size,
-                "timestamp": timestamp_str
-            }
-            results["cameras"][camera_code] = count_data
-            logger.info(f"Processed camera {camera_name}: vehicle_count={vehicle_count}")
-        except Exception as e:
-            logger.error(f"Error processing camera {camera_name} for vehicle counts: {e}")
-            failure_count += 1
             count_data = {
                 "name": camera_name,
                 "vehicle_count": 0,
                 "avg_vehicle_size": 0,
                 "timestamp": timestamp_str
             }
-            results["cameras"][camera_mapping.get(camera_name, camera_name)] = count_data
+            if image is None:
+                failure_count += 1
+                logger.warning(f"Image fetch failed for {camera_name} (ID: {camera_id})")
+            else:
+                success_count += 1
+                logger.info(f"Successfully fetched image for {camera_name}")
+                analysis_result = analyze_image(image)
+                count_data.update({
+                    "vehicle_count": analysis_result["vehicle_count"],
+                    "avg_vehicle_size": analysis_result["avg_vehicle_size"]
+                })
+            results["cameras"][camera_id] = count_data
+            logger.info(f"Processed camera {camera_name}: vehicle_count={count_data['vehicle_count']}")
+        except Exception as e:
+            failure_count += 1
+            logger.error(f"Error processing camera {camera_name} (ID: {camera_id}) for vehicle counts: {e}")
+            results["cameras"][camera_id] = count_data
     logger.info(f"Vehicle count processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(VEHICLE_COUNTS_FILE, results)
@@ -801,7 +843,14 @@ def index():
 @app.route('/cameras')
 def get_cameras():
     try:
-        cameras_info = [{"code": chr(65 + idx), "id": camera_id, "name": camera_location, "url": camera_websites[idx] if idx < len(camera_websites) else None} for idx, (camera_id, camera_location) in enumerate(cameras)]
+        cameras_info = [
+            {
+                "code": camera['id'],
+                "id": camera['id'],
+                "name": camera['title'],
+                "url": camera['url']
+            } for camera in camera_websites
+        ]
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_cameras": len(cameras_info),
@@ -1102,18 +1151,17 @@ def check_camera_status():
         if not load_dependencies():
             return jsonify({"error": "Failed to load dependencies", "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
         for camera_id, camera_name in cameras:
-            camera_code = camera_mapping.get(camera_name, camera_name)
             try:
-                logger.info(f"Checking camera {camera_name}")
+                logger.info(f"Checking camera {camera_name} (ID: {camera_id})")
                 image = fetch_camera_image(camera_id)
                 if image is None:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "offline", "error": "Failed to fetch image"}
+                    results["cameras"][camera_id] = {"name": camera_name, "status": "offline", "error": "Failed to fetch image"}
                 elif image.size > 1000:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
+                    results["cameras"][camera_id] = {"name": camera_name, "status": "online", "resolution": f"{image.shape[1]}x{image.shape[0]}"}
                 else:
-                    results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": "Retrieved image is too small or invalid"}
+                    results["cameras"][camera_id] = {"name": camera_name, "status": "error", "error": "Retrieved image is too small or invalid"}
             except Exception as e:
-                results["cameras"][camera_code] = {"name": camera_name, "status": "error", "error": str(e)}
+                results["cameras"][camera_id] = {"name": camera_name, "status": "error", "error": str(e)}
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
