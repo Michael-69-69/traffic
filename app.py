@@ -685,7 +685,26 @@ def index():
         "using_models": USE_MODELS,
         "last_update": last_vehicle_count_update.strftime('%Y-%m-%d %H:%M:%S') if last_vehicle_count_update else None
     })
-
+@app.route('/live-densities')
+def get_live_densities():
+    try:
+        density = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not density:
+            return jsonify({
+                "error": "No density data available yet",
+                "message": "Please wait for the first calculation cycle"
+            }), 404
+        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        density["update_interval"] = "30 seconds"
+        if last_density_update:
+            next_update = last_density_update + timedelta(seconds=30)
+            time_until_next = next_update - datetime.now()
+            density["next_update_in"] = f"{int(time_until_next.total_seconds())} seconds" if time_until_next.total_seconds() > 0 else "Updating now..."
+        return jsonify(density)
+    except Exception as e:
+        logger.error(f"Error reading live density: {e}")
+        return jsonify({"error": str(e)}), 500
+        
 @app.route('/live-vehicleCounts')
 def get_live_vehicle_counts():
     try:
