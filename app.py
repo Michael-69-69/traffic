@@ -763,7 +763,7 @@ def get_critical_vehicle_counts():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error reading critical vehicle counts: {e}")
-        return jsonify({"error": "str(e)}), 500
+        return jsonify({"error": "str(e)"}), 500
 
 @app.route('/day_before_yesterday-critical-vehicleCounts')
 def get_day_before_yesterday_critical_vehicle_counts():
