@@ -20,7 +20,7 @@ import requests
 # Initialize Flask
 app = Flask(__name__)
 
-# Set up logging
+# Set up logging with INFO level (reverted from DEBUG)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ camera_websites = [
     },
     {
         'id': 'J',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A9%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Điện Biên Phủ - CMT8'
     },
     {
@@ -204,7 +204,6 @@ def parse_camera_data():
 
 # Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
-# Update CAMERA_URL_TEMPLATE to use the simplified format for all cameras
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camera_id}&bg=black&w=300&h=230')
 
 # Lazy-load dependencies
@@ -579,24 +578,40 @@ def fetch_camera_image(camera_id):
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
-            "Referer": "https://giaothong.hochiminhcity.gov.vn/"
+            "Referer": "https://giaothong.hochiminhcity.gov.vn/",
+            "Origin": "https://giaothong.hochiminhcity.gov.vn"
         })
-        # Warm-up request to establish session
-        _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=10)
-        # Find the camera's camId from camera_websites
+        # Warm-up request to establish session and get cookies
+        try:
+            warmup_response = _session.get("https://giaothong.hochiminhcity.gov.vn/", timeout=15)
+            warmup_response.raise_for_status()
+            logger.info(f"Warm-up request successful: {warmup_response.status_code}")
+            logger.debug(f"Warm-up cookies: {_session.cookies.get_dict()}")
+        except Exception as e:
+            logger.warning(f"Warm-up request failed: {e}")
+
+        # Find the camera's camId and videoUrl from camera_websites
         camera = next((c for c in camera_websites if c['id'] == camera_id), None)
         if not camera:
             logger.error(f"Camera {camera_id} not found in camera_websites")
             return None
         cam_id = camera['url'].split('camId=')[1].split('&')[0]
-        # Construct URL using the camera's camId
+        video_url = camera['url'].split('videoUrl=')[1] if 'videoUrl=' in camera['url'] else None
+
+        # Try primary URL first
         url = CAMERA_URL_TEMPLATE.format(camera_id=cam_id)
-        logger.info(f"Fetching image from {url}")
+        logger.info(f"Fetching image from primary URL: {url}")
         for attempt in range(3):
             try:
-                response = _session.get(url, timeout=10)
+                response = _session.get(url, timeout=15)
                 response.raise_for_status()
+                logger.debug(f"Response headers: {response.headers}")
+                logger.debug(f"Response content length: {len(response.content)} bytes")
                 if response.content and len(response.content) > 100:
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'image' not in content_type:
+                        logger.warning(f"Unexpected Content-Type: {content_type}")
+                        continue
                     image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
                     image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
                     if image is not None and image.size > 0:
@@ -607,11 +622,33 @@ def fetch_camera_image(camera_id):
                     logger.warning(f"Empty or invalid response from {url} (attempt {attempt+1}/3)")
             except _requests.exceptions.HTTPError as e:
                 logger.error(f"HTTP error for {url}: {e} (attempt {attempt+1}/3)")
-                if e.response.status_code == 403:
-                    logger.error(f"403 Forbidden for {url}: Response headers: {e.response.headers}")
+                if e.response is not None:
+                    logger.error(f"Status code: {e.response.status_code}")
+                    logger.error(f"Response headers: {e.response.headers}")
+                    logger.error(f"Response content: {e.response.text[:500]}")
             except Exception as e:
                 logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
-            time.sleep(1)
+            time.sleep(2)  # Increased delay between retries
+
+        # Fallback to video URL if available
+        if video_url:
+            logger.info(f"Falling back to video URL for camera {camera_id}: {video_url}")
+            try:
+                cap = _cv2.VideoCapture(video_url)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret and frame is not None and frame.size > 0:
+                        logger.info(f"Successfully extracted frame from video stream for camera {camera_id}")
+                        return frame
+                    logger.warning(f"Failed to extract frame from {video_url}")
+                else:
+                    logger.error(f"Failed to open video stream {video_url}")
+            except Exception as e:
+                logger.error(f"Error extracting frame from video URL {video_url}: {e}")
+        else:
+            logger.warning(f"No video URL available for camera {camera_id}")
+
         logger.error(f"Failed to fetch valid image for {camera_id} after 3 attempts")
         return None
     except Exception as e:
