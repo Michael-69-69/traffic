@@ -3,9 +3,8 @@ import json
 import time
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify
-from urllib.parse import urlparse, parse_qs, unquote
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -33,9 +32,6 @@ REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
 FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 
 # File names for density and vehicle count data
-TODAY_DENSITIES_FILE = "today_densities.json"
-YESTERDAY_DENSITIES_FILE = "yesterday_densities.json"
-CRITICAL_DENSITIES_FILE = "critical_densities.json"
 OUTPUT_JSON_FILE = "densities.json"
 VEHICLE_COUNTS_FILE = "vehicle_counts.json"
 
@@ -126,16 +122,7 @@ def download_json_from_drive(filename):
         logger.error(f"Error downloading {filename} from Google Drive: {e}")
         return None
 
-# Base URL and default parameters for the camera feed
-main_url = "https://giaothong.hochiminhcity.gov.vn"
-base_url = "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx"
-default_params = {
-    "bg": "black",
-    "w": 300,
-    "h": 230
-}
-
-# Camera websites list aligned with frontend
+# Camera websites list
 camera_websites = [
     {
         'id': 'A',
@@ -154,17 +141,17 @@ camera_websites = [
     },
     {
         'id': 'D',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Ngã sáu Nguyễn Tri Phương 1'
     },
     {
         'id': 'E',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Ngã sáu Nguyễn Tri Phương'
     },
     {
         'id': 'F',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BAt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Lê Đại Hành 2'
     },
     {
@@ -174,12 +161,12 @@ camera_websites = [
     },
     {
         'id': 'H',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Ngã sáu Cộng Hòa 1'
     },
     {
         'id': 'I',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BUt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera& primesVideoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Ngã sáu Cộng Hòa'
     },
     {
@@ -189,21 +176,21 @@ camera_websites = [
     },
     {
         'id': 'K',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Nút giao Công Trường Dân Chủ'
     },
     {
         'id': 'L',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BUt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
+        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
         'title': 'Nút giao Công Trường Dân Chủ 1'
     }
 ]
 
-# Parse camera data from URLs
+# Parse camera data
 def parse_camera_data():
     cameras = []
     camera_mapping = {}
-    for idx, camera in enumerate(camera_websites):
+    for camera in camera_websites:
         try:
             camera_id = camera['id']
             camera_location = camera['title']
@@ -225,7 +212,7 @@ _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _se
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
 last_density_update = None
 last_vehicle_count_update = None
-DEVICE = 'cpu'  # Default to CPU as per new model
+DEVICE = 'cpu'
 
 # Define MiniUNet architecture
 class MiniUNet(nn.Module):
@@ -335,7 +322,6 @@ def load_models():
 def preprocess_image(img):
     if not load_dependencies() or img is None:
         return None, None
-    # Preprocess for road model (TensorFlow)
     img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
     y, cr, cb = _cv2.split(img_road)
     clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
@@ -346,7 +332,6 @@ def preprocess_image(img):
     img_road = img_road.astype('float32') / 255.0
     img_road = _np.expand_dims(img_road, axis=0)
     
-    # Preprocess for vehicle model (PyTorch)
     transform = _transforms.Compose([
         _transforms.ToPILImage(),
         _transforms.Resize((384, 384)),
@@ -493,12 +478,10 @@ def analyze_image(image):
         if img_road is None or img_vehicle is None:
             return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
         
-        # Road segmentation (TensorFlow)
         road_pred = _road_model.predict(img_road, verbose=0)
         road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
         road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
         
-        # Road mask refinement
         contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
         if contours:
             largest_contour = max(contours, key=_cv2.contourArea)
@@ -511,14 +494,12 @@ def analyze_image(image):
             refined_road_mask = road_mask_resized.copy()
         road_pixels = _np.count_nonzero(refined_road_mask)
         
-        # Vehicle detection (PyTorch)
         with _torch.no_grad():
             vehicle_pred = _vehicle_model(img_vehicle)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
         binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
         
-        # Calculate density
         road_binary = (refined_road_mask > 0).astype(np.uint8)
         vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(np.uint8)
         vehicle_pixels_on_road = _np.count_nonzero(vehicles_on_road)
@@ -526,7 +507,6 @@ def analyze_image(image):
         density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
         density_percentage = round(max(0, min(100, density_percentage)), 1)
         
-        # Vehicle counting
         kernel_open = _np.ones((2, 2), np.uint8)
         kernel_close = _np.ones((5, 5), np.uint8)
         vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, kernel_open, iterations=1)
@@ -539,7 +519,7 @@ def analyze_image(image):
         blob_sizes = []
         min_reasonable_blob = 500
         max_reasonable_blob = 8000
-        for i in range(1, num_labels):  # Skip background
+        for i in range(1, num_labels):
             blob_size = stats[i, _cv2.CC_STAT_AREA]
             if min_reasonable_blob <= blob_size <= max_reasonable_blob:
                 blob_sizes.append(blob_size)
@@ -566,55 +546,6 @@ def analyze_image(image):
         import traceback
         logger.error(traceback.format_exc())
         return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
-
-def check_new_day():
-    today = datetime.now().date()
-    today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
-    if 'date' in today_densities:
-        try:
-            file_date = datetime.strptime(today_densities['date'], '%Y-%m-%d').date()
-            if file_date < today:
-                logger.info(f"New day detected. Transferring data from {file_date} to yesterday")
-                upload_json_to_drive(YESTERDAY_DENSITIES_FILE, today_densities)
-                update_critical_densities(today_densities)
-                today_densities = {'date': today.strftime('%Y-%m-%d'), 'densities_by_time': {}}
-                upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
-                logger.info("Successfully transferred data to yesterday and reset today's data")
-        except Exception as e:
-            logger.error(f"Error processing date change: {e}")
-
-def update_critical_densities(densities_data):
-    try:
-        critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE) or {}
-        density_by_time = densities_data.get('densities_by_time', {})
-        for camera_code in [camera['id'] for camera in camera_websites]:
-            max_density = 0.0
-            for timestamp, cameras_data in density_by_time.items():
-                if camera_code in cameras_data:
-                    density = cameras_data[camera_code].get('density', 0.0)
-                    max_density = max(max_density, density)
-            if camera_code not in critical_densities or max_density > critical_densities[camera_code]:
-                critical_densities[camera_code] = max_density
-                logger.info(f"Updated critical density for {camera_code}: {max_density}")
-        upload_json_to_drive(CRITICAL_DENSITIES_FILE, critical_densities)
-        logger.info("Critical density updated successfully")
-    except Exception as e:
-        logger.error(f"Error updating critical density: {e}")
-
-def manage_historical_densities():
-    check_new_day()
-    today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
-    if 'date' not in today_densities or today_densities['date'] != datetime.now().date().strftime('%Y-%m-%d'):
-        today_densities = {
-            'date': datetime.now().date().strftime('%Y-%m-%d'),
-            'densities_by_time': {}
-        }
-        upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
-    critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
-    if not critical_densities:
-        sample_critical_densities = {camera['id']: 80.0 for camera in camera_websites}
-        upload_json_to_drive(CRITICAL_DENSITIES_FILE, sample_critical_densities)
-    return today_densities
 
 def fetch_camera_image(camera_id):
     if not load_dependencies():
@@ -657,18 +588,6 @@ def fetch_camera_image(camera_id):
         logger.error(f"Error fetching camera image for {camera_id}: {e}")
         return None
 
-def store_today_density(timestamp_str, camera_code, density_data):
-    try:
-        today_densities = download_json_from_drive(TODAY_DENSITIES_FILE) or {}
-        if 'densities_by_time' not in today_densities:
-            today_densities['densities_by_time'] = {}
-        if timestamp_str not in today_densities['densities_by_time']:
-            today_densities['densities_by_time'][timestamp_str] = {}
-        today_densities['densities_by_time'][timestamp_str][camera_code] = density_data
-        upload_json_to_drive(TODAY_DENSITIES_FILE, today_densities)
-    except Exception as e:
-        logger.error(f"Error storing today's density: {e}")
-
 def fetch_and_process_densities():
     global last_density_update
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -705,7 +624,6 @@ def fetch_and_process_densities():
                 "avg_vehicle_size": avg_vehicle_size
             })
             results["cameras"][camera_id] = density_data
-            store_today_density(timestamp_str, camera_id, density_data)
             logger.info(f"Processed camera {camera_name}: density={density}, vehicle_count={vehicle_count}")
         except Exception as e:
             failure_count += 1
@@ -717,7 +635,6 @@ def fetch_and_process_densities():
                 "avg_vehicle_size": 0,
                 "timestamp": timestamp_str
             }
-            store_today_density(timestamp_str, camera_id, results["cameras"][camera_id])
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(OUTPUT_JSON_FILE, results)
@@ -769,7 +686,6 @@ def density_worker():
     logger.info("Density worker initialized - running every 30 seconds")
     try:
         logger.info("Starting initial density calculation")
-        manage_historical_densities()
         fetch_and_process_densities()
         fetch_and_process_vehicle_counts()
         logger.info("Initial density and vehicle count calculation completed")
@@ -812,22 +728,12 @@ def start_worker():
         import traceback
         logger.error(traceback.format_exc())
 
-def date_transition_worker():
-    while True:
-        now = datetime.now()
-        midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
-        seconds_until_midnight = (midnight - now).total_seconds()
-        time.sleep(seconds_until_midnight + 1)
-        check_new_day()
-        logger.info(f"Date transition completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# Initialize Google Drive and start workers
+# Initialize Google Drive and start worker
 if __name__ != "__main__":
     init_google_drive()
     if drive_service is None:
         logger.error("Google Drive initialization failed. Application may not function correctly.")
     else:
-        threading.Thread(target=date_transition_worker, daemon=True).start()
         start_worker()
 
 @app.route('/')
@@ -839,26 +745,6 @@ def index():
         "using_models": USE_MODELS,
         "last_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
     })
-
-@app.route('/cameras')
-def get_cameras():
-    try:
-        cameras_info = [
-            {
-                "code": camera['id'],
-                "id": camera['id'],
-                "name": camera['title'],
-                "url": camera['url']
-            } for camera in camera_websites
-        ]
-        return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "total_cameras": len(cameras_info),
-            "cameras": cameras_info
-        })
-    except Exception as e:
-        logger.error(f"Error fetching cameras: {e}")
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/live-densities')
 def get_live_densities():
@@ -900,56 +786,12 @@ def get_vehicle_counts():
         logger.error(f"Error reading vehicle counts: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/today-densities')
-def get_today_densities():
-    try:
-        today_densities = download_json_from_drive(TODAY_DENSITIES_FILE)
-        if not today_densities:
-            manage_historical_densities()
-            today_densities = download_json_from_drive(TODAY_DENSITIES_FILE)
-        return jsonify(today_densities)
-    except Exception as e:
-        logger.error(f"Error reading today's densities: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/yesterday-densities')
-def get_yesterday_densities():
-    try:
-        yesterday_densities = download_json_from_drive(YESTERDAY_DENSITIES_FILE)
-        if not yesterday_densities:
-            return jsonify({
-                "message": "No yesterday data available yet",
-                "date": None,
-                "densities_by_time": {}
-            })
-        return jsonify(yesterday_densities)
-    except Exception as e:
-        logger.error(f"Error reading yesterday's densities: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/critical-densities')
-def get_critical_densities():
-    try:
-        critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
-        if not critical_densities:
-            manage_historical_densities()
-            critical_densities = download_json_from_drive(CRITICAL_DENSITIES_FILE)
-        result = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "description": "Critical density thresholds based on historical maximum values",
-            "critical_densities": critical_densities
-        }
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error reading critical densities: {e}")
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/densities')
 def get_densities():
     try:
         density = download_json_from_drive(OUTPUT_JSON_FILE)
         if not density:
-            manage_historical_densities()
+            fetch_and_process_densities()
             density = download_json_from_drive(OUTPUT_JSON_FILE)
         raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
         return jsonify(raw_densities)
@@ -973,9 +815,6 @@ def status():
 @app.route('/health')
 def health_check():
     try:
-        today_exists = bool(get_file_id(TODAY_DENSITIES_FILE))
-        yesterday_exists = bool(get_file_id(YESTERDAY_DENSITIES_FILE))
-        critical_exists = bool(get_file_id(CRITICAL_DENSITIES_FILE))
         output_exists = bool(get_file_id(OUTPUT_JSON_FILE))
         vehicle_counts_exists = bool(get_file_id(VEHICLE_COUNTS_FILE))
         return jsonify({
@@ -983,9 +822,6 @@ def health_check():
             "storage": {
                 "backend": "Google Drive",
                 "folder_id": FOLDER_ID,
-                "today_densities_exists": today_exists,
-                "yesterday_densities_exists": yesterday_exists,
-                "critical_densities_exists": critical_exists,
                 "output_file_exists": output_exists,
                 "vehicle_counts_exists": vehicle_counts_exists
             },
@@ -1037,9 +873,6 @@ def debug():
         storage_info = {
             "backend": "Google Drive",
             "folder_id": FOLDER_ID,
-            "today_densities_exists": bool(get_file_id(TODAY_DENSITIES_FILE)),
-            "yesterday_densities_exists": bool(get_file_id(YESTERDAY_DENSITIES_FILE)),
-            "critical_densities_exists": bool(get_file_id(CRITICAL_DENSITIES_FILE)),
             "output_json_exists": bool(get_file_id(OUTPUT_JSON_FILE)),
             "vehicle_counts_exists": bool(get_file_id(VEHICLE_COUNTS_FILE))
         }
@@ -1171,7 +1004,6 @@ if __name__ == "__main__":
     if drive_service is None:
         logger.error("Google Drive initialization failed. Exiting.")
         exit(1)
-    manage_historical_densities()
     start_worker()
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, debug=True)
