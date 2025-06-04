@@ -161,7 +161,7 @@ camera_websites = [
     {
         'id': 'H',
         'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Cộng Hòa 1'
+        'title': 'Ngã sáu Cộng hòa 1'
     },
     {
         'id': 'I',
@@ -340,19 +340,150 @@ def preprocess_image(img):
     
     return img_road, img_vehicle
 
+def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=500):
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    if not significant_blobs:
+        return 0, 0
+    
+    def find_vehicle_unit_size(sizes):
+        sizes = sorted(sizes)
+        smallest_blob = min(sizes)
+        if smallest_blob > 1500:
+            return 200
+        
+        q5, q95 = _np.percentile(sizes, [5, 95])
+        filtered_sizes = [s for s in sizes if q5 <= s <= q95]
+        if not filtered_sizes:
+            filtered_sizes = sizes
+        
+        single_vehicle_candidates = [s for s in filtered_sizes if s <= _np.percentile(filtered_sizes, 25)]
+        unit_size = _np.median(single_vehicle_candidates) if single_vehicle_candidates and min(single_vehicle_candidates) <= 1200 else 200
+        return max(500, min(unit_size, 1800))
+    
+    unit_vehicle_size = find_vehicle_unit_size(significant_blobs)
+    total_vehicles = 0
+    for blob_size in significant_blobs:
+        vehicles_in_blob = 1 if blob_size < unit_vehicle_size * 1.2 else max(1, int(blob_size / unit_vehicle_size))
+        total_vehicles += vehicles_in_blob
+    
+    return int(total_vehicles), int(unit_vehicle_size)
+
+def estimate_vehicles_statistical_clustering(blob_sizes, min_blob_size=500):
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    if not significant_blobs:
+        return 0, 0
+    
+    sizes = _np.array(significant_blobs)
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1500:
+        avg_single_vehicle = 200
+        vehicle_count = sum(max(1, int(blob_size / avg_single_vehicle)) for blob_size in sizes)
+        return vehicle_count, int(avg_single_vehicle)
+    
+    q20, q50, q80 = _np.percentile(sizes, [20, 50, 80])
+    iqr = q80 - q20
+    single_vehicle_upper = q20 + 0.3 * iqr
+    single_vehicle_blobs = sizes[sizes <= single_vehicle_upper]
+    multi_vehicle_blobs = sizes[sizes > single_vehicle_upper]
+    
+    avg_single_vehicle = _np.median(single_vehicle_blobs) if len(single_vehicle_blobs) > 0 else max(200, q20)
+    avg_single_vehicle = max(200, min(avg_single_vehicle, 1500))
+    
+    vehicle_count = len(single_vehicle_blobs)
+    vehicle_count += sum(max(1, int(blob_size / avg_single_vehicle)) for blob_size in multi_vehicle_blobs)
+    
+    return vehicle_count, int(avg_single_vehicle)
+
+def estimate_vehicles_histogram_analysis(blob_sizes, min_blob_size=500):
+    significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
+    if not significant_blobs:
+        return 0, 0
+    
+    sizes = _np.array(significant_blobs)
+    smallest_blob = min(sizes)
+    
+    if smallest_blob > 1500:
+        typical_vehicle_size = 200
+        total_vehicles = sum(max(1, int(size / typical_vehicle_size)) for size in sizes)
+        return int(total_vehicles), int(typical_vehicle_size)
+    
+    if len(significant_blobs) >= 3:
+        n_bins = min(8, len(significant_blobs) // 2)
+        hist, bin_edges = _np.histogram(sizes, bins=n_bins)
+        peak_bin_idx = _np.argmax(hist)
+        peak_range = (bin_edges[peak_bin_idx], bin_edges[peak_bin_idx + 1])
+        peak_sizes = sizes[(sizes >= peak_range[0]) & (sizes <= peak_range[1])]
+        typical_vehicle_size = _np.median(peak_sizes) if len(peak_sizes) > 0 else _np.percentile(sizes, 20)
+    else:
+        typical_vehicle_size = _np.median(sizes)
+    
+    typical_vehicle_size = max(200, min(typical_vehicle_size, 1500))
+    total_vehicles = sum(max(1, int(size / typical_vehicle_size)) for size in sizes)
+    
+    return int(total_vehicles), int(typical_vehicle_size)
+
+def apply_greenshields_model(vehicle_count, road_area_pixels, image_shape):
+    if road_area_pixels == 0 or vehicle_count == 0:
+        return 0, 0, "No Traffic"
+    
+    image_area = image_shape[0] * image_shape[1]
+    road_ratio = road_area_pixels / image_area
+    density_metric = vehicle_count / (road_ratio * 1000)
+    
+    free_flow_speed = 60
+    jam_density = 80
+    speed_ratio = max(0, 1 - (density_metric / jam_density)) if jam_density > 0 else 0
+    estimated_speed = free_flow_speed * speed_ratio
+    
+    if density_metric < 10:
+        traffic_level = "Free Flow"
+    elif density_metric < 25:
+        traffic_level = "Light Traffic"
+    elif density_metric < 50:
+        traffic_level = "Moderate Traffic"
+    elif density_metric < 70:
+        traffic_level = "Heavy Traffic"
+    else:
+        traffic_level = "Congested"
+    
+    return estimated_speed, density_metric, traffic_level
+
 def analyze_image(image):
     if not load_dependencies() or image is None:
-        return {"density": 0.0}
+        return {
+            "density": 0.0,
+            "vehicle_count": 0,
+            "avg_vehicle_size": 0,
+            "density_metric": 0.0,
+            "estimated_speed": 0.0,
+            "traffic_level": "No Traffic"
+        }
     try:
         if _road_model is None or _vehicle_model is None:
             logger.warning("Models not loaded, using fallback values")
-            return {"density": 0.0}
+            return {
+                "density": 0.0,
+                "vehicle_count": 0,
+                "avg_vehicle_size": 0,
+                "density_metric": 0.0,
+                "estimated_speed": 0.0,
+                "traffic_level": "No Traffic"
+            }
         img_road, img_vehicle = preprocess_image(image)
         if img_road is None or img_vehicle is None:
-            return {"density": 0.0}
+            return {
+                "density": 0.0,
+                "vehicle_count": 0,
+                "avg_vehicle_size": 0,
+                "density_metric": 0.0,
+                "estimated_speed": 0.0,
+                "traffic_level": "No Traffic"
+            }
         
+        # Road segmentation
         road_pred = _road_model.predict(img_road, verbose=0)
-        road_mask = (road_pred.squeeze() > 0.5).astype(np.uint8)
+        road_mask = (road_pred.squeeze() > 0.5).astype(_np.uint8)
         road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
         
         contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
@@ -361,32 +492,78 @@ def analyze_image(image):
             epsilon = 0.01 * _cv2.arcLength(largest_contour, True)
             smoothed_contour = _cv2.approxPolyDP(largest_contour, epsilon, True)
             hull = _cv2.convexHull(smoothed_contour)
-            refined_road_mask = _np.zeros_like(road_mask_resized, dtype=np.uint8)
+            refined_road_mask = _np.zeros_like(road_mask_resized, dtype=_np.uint8)
             _cv2.fillPoly(refined_road_mask, [hull], 255)
         else:
             refined_road_mask = road_mask_resized.copy()
         road_pixels = _np.count_nonzero(refined_road_mask)
         
+        # Vehicle detection
         with _torch.no_grad():
             vehicle_pred = _vehicle_model(img_vehicle)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
-        binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(np.uint8)
+        binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(_np.uint8)
         
-        road_binary = (refined_road_mask > 0).astype(np.uint8)
-        vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(np.uint8)
+        # Calculate vehicle pixels on road
+        road_binary = (refined_road_mask > 0).astype(_np.uint8)
+        vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(_np.uint8)
         vehicle_pixels_on_road = _np.count_nonzero(vehicles_on_road)
         
+        # Calculate density
         density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
         density_percentage = round(max(0, min(100, density_percentage)), 1)
         
-        logger.info(f"Calculated density: {density_percentage}%")
-        return {"density": density_percentage}
+        # Vehicle counting with blob analysis
+        kernel_open = _np.ones((2, 2), _np.uint8)
+        kernel_close = _np.ones((5, 5), _np.uint8)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, kernel_open, iterations=1)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road_cleaned, _cv2.MORPH_CLOSE, kernel_close, iterations=1)
+        
+        num_labels, _, stats, _ = _cv2.connectedComponentsWithStats(vehicles_on_road_cleaned, connectivity=8)
+        blob_sizes = []
+        min_reasonable_blob = 500
+        max_reasonable_blob = 8000
+        for i in range(1, num_labels):
+            blob_size = stats[i, _cv2.CC_STAT_AREA]
+            if min_reasonable_blob <= blob_size <= max_reasonable_blob:
+                blob_sizes.append(blob_size)
+        
+        if blob_sizes:
+            method1_count, method1_unit = estimate_vehicle_count_from_blobs(blob_sizes)
+            method2_count, method2_unit = estimate_vehicles_statistical_clustering(blob_sizes)
+            method3_count, method3_unit = estimate_vehicles_histogram_analysis(blob_sizes)
+            all_counts = [method1_count, method2_count, method3_count]
+            estimated_vehicle_count = min(all_counts)
+            avg_vehicle_size = method1_unit if estimated_vehicle_count == method1_count else method2_unit if estimated_vehicle_count == method2_count else method3_unit
+        else:
+            estimated_vehicle_count = 0
+            avg_vehicle_size = 0
+        
+        # Apply Greenshields model
+        estimated_speed, density_metric, traffic_level = apply_greenshields_model(estimated_vehicle_count, road_pixels, image.shape)
+        
+        logger.info(f"Calculated density: {density_percentage}%, vehicles: {estimated_vehicle_count}, speed: {estimated_speed:.1f} km/h, traffic: {traffic_level}")
+        return {
+            "density": density_percentage,
+            "vehicle_count": estimated_vehicle_count,
+            "avg_vehicle_size": avg_vehicle_size,
+            "density_metric": round(density_metric, 2),
+            "estimated_speed": round(estimated_speed, 1),
+            "traffic_level": traffic_level
+        }
     except Exception as e:
         logger.error(f"Error analyzing image: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return {"density": 0.0}
+        return {
+            "density": 0.0,
+            "vehicle_count": 0,
+            "avg_vehicle_size": 0,
+            "density_metric": 0.0,
+            "estimated_speed": 0.0,
+            "traffic_level": "No Traffic"
+        }
 
 def fetch_camera_image(camera_id):
     if not load_dependencies():
@@ -442,28 +619,28 @@ def fetch_and_process_densities():
             density_data = {
                 "name": camera_name,
                 "density": 0.0,
+                "vehicle_count": 0,
+                "avg_vehicle_size": 0,
+                "density_metric": 0.0,
+                "estimated_speed": 0.0,
+                "traffic_level": "No Traffic",
                 "timestamp": timestamp_str
             }
             if image is None:
                 failure_count += 1
                 logger.warning(f"Image fetch failed for {camera_name} (ID: {camera_id})")
-                density = round(_np.random.uniform(10.0, 90.0), 1)
+                density_data["density"] = round(_np.random.uniform(10.0, 90.0), 1)
             else:
                 success_count += 1
                 logger.info(f"Successfully fetched image for {camera_name}")
                 analysis_result = analyze_image(image)
-                density = analysis_result["density"]
-            density_data.update({"density": density})
+                density_data.update(analysis_result)
             results["cameras"][camera_id] = density_data
-            logger.info(f"Processed camera {camera_name}: density={density}")
+            logger.info(f"Processed camera {camera_name}: density={density_data['density']}, vehicles={density_data['vehicle_count']}")
         except Exception as e:
             failure_count += 1
             logger.error(f"Error processing camera {camera_name} (ID: {camera_id}): {e}")
-            results["cameras"][camera_id] = {
-                "name": camera_name,
-                "density": 0.0,
-                "timestamp": timestamp_str
-            }
+            results["cameras"][camera_id] = density_data
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(OUTPUT_JSON_FILE, results)
@@ -560,7 +737,16 @@ def get_densities():
         if not density:
             fetch_and_process_densities()
             density = download_json_from_drive(OUTPUT_JSON_FILE)
-        raw_densities = {camera_code: camera_data["density"] for camera_code, camera_data in density["cameras"].items()}
+        raw_densities = {
+            camera_code: {
+                "density": camera_data["density"],
+                "vehicle_count": camera_data["vehicle_count"],
+                "avg_vehicle_size": camera_data["avg_vehicle_size"],
+                "density_metric": camera_data["density_metric"],
+                "estimated_speed": camera_data["estimated_speed"],
+                "traffic_level": camera_data["traffic_level"]
+            } for camera_code, camera_data in density["cameras"].items()
+        }
         return jsonify(raw_densities)
     except Exception as e:
         logger.error(f"Error reading densities: {e}")
