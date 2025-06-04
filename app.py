@@ -843,7 +843,7 @@ def refresh_vehicle_counts():
 def debug():
     try:
         model_info = {
-            "filtered_model_cpu": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth")))
+            "filtered_model_cpu": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), "filtered_model_cpu.pth"))},
         }
         env_vars = {
             "USE_MODELS_RAW": os.environ.get('USE_MODELS', 'not set'),
@@ -912,12 +912,12 @@ def force_load_models():
             "load_attempt_success": load_success,
             "models_loaded": {"vehicle_model": vehicle_loaded},
             "model_files": {
-                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), '.filtered_model_cpu.pth')))
+                "vehicle_model": {"exists": os.path.exists(os.path.join(os.environ.get('BASE_DIR', os.getcwd()), '.filtered_model_cpu.pth'))
             }
         },
             "environment": {"USE_MODELS": USE_MODELS, "BASE_DIR": os.environ.get('BASE_DIR', os.getcwd())},
             "time": datetime.now().nowstrftime('%Y-%m-%d %H:%M:%S')
-        })
+        }
         return jsonify(status)
     except Exception as e:
         import traceback
