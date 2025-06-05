@@ -1,14 +1,9 @@
 import os
-import json
 import time
 import logging
 import threading
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-import io
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -24,14 +19,6 @@ app = Flask(__name__)
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Google Drive setup
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-CLIENT_ID = os.environ.get('GOOGLE_DRIVE_CLIENT_ID')
-CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET')
-REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
-FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
-OUTPUT_JSON_FILE = "densities.json"
 
 # Camera configurations
 camera_websites = [
@@ -64,7 +51,6 @@ headers = {
 }
 
 # Global variables
-drive_service = None
 _session = None
 _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model = [None] * 8
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
@@ -76,72 +62,6 @@ worker_lock = threading.Lock()
 cameras = [(c['id'], c['title']) for c in camera_websites]
 camera_mapping = {c['id']: c['title'] for c in camera_websites}
 logger.info(f"Parsed cameras: {cameras}")
-
-# Google Drive initialization
-def init_google_drive():
-    global drive_service
-    try:
-        creds = Credentials(
-            None,
-            refresh_token=REFRESH_TOKEN,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            scopes=SCOPES,
-            token_uri="https://oauth2.googleapis.com/token"
-        )
-        drive_service = build('drive', 'v3', credentials=creds)
-        logger.info("Google Drive service initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize Google Drive: {e}")
-        drive_service = None
-
-def get_file_id(filename):
-    try:
-        query = f"'{FOLDER_ID}' in parents and name = '{filename}' and trashed = false"
-        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-        files = results.get('files', [])
-        return files[0]['id'] if files else None
-    except Exception as e:
-        logger.error(f"Error finding file {filename}: {e}")
-        return None
-
-def upload_json_to_drive(filename, data):
-    try:
-        temp_file = f"/tmp/{filename}"
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        file_id = get_file_id(filename)
-        media = MediaFileUpload(temp_file, mimetype='application/json')
-        if file_id:
-            drive_service.files().update(fileId=file_id, media_body=media).execute()
-            logger.info(f"Updated {filename} in Google Drive")
-        else:
-            file_metadata = {'name': filename, 'parents': [FOLDER_ID], 'mimeType': 'application/json'}
-            drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            logger.info(f"Uploaded {filename} to Google Drive")
-        os.remove(temp_file)
-    except Exception as e:
-        logger.error(f"Error uploading {filename}: {e}")
-
-def download_json_from_drive(filename):
-    try:
-        file_id = get_file_id(filename)
-        if not file_id:
-            logger.warning(f"File {filename} not found")
-            return None
-        request = drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        data = json.loads(fh.read().decode('utf-8'))
-        logger.info(f"Downloaded {filename} from Google Drive")
-        return data
-    except Exception as e:
-        logger.error(f"Error downloading {filename}: {e}")
-        return None
 
 # Dependency and model loading
 def load_dependencies():
@@ -158,6 +78,8 @@ def load_dependencies():
             _tf, _cv2, _np, _requests, _torch, _transforms = tf, cv2, np, requests, torch, transforms
             _session = _requests.Session()
             _session.headers.update(headers)
+            if _tf and physical_devices := _tf.config.list_physical_devices('GPU'):
+                _tf.config.experimental.set_memory_growth(physical_devices[0], True)
             logger.info("Dependencies loaded")
             return True
         except Exception as e:
@@ -267,7 +189,7 @@ def fetch_camera_image(camera_id):
     finally:
         gc.collect()
 
-# Image processing (from second code, unchanged except for imports)
+# Image processing
 def preprocess_image(img):
     if not load_dependencies() or img is None:
         return None, None
@@ -458,14 +380,11 @@ def fetch_and_process_densities():
         finally:
             gc.collect()
     logger.info(f"Processing complete. Success: {success_count}, Failure: {failure_count}")
-    if drive_service:
-        upload_json_to_drive(OUTPUT_JSON_FILE, results)
     return results
 
 def density_worker():
     logger.info("Density worker started")
     try:
-        fetch_and_process_densities()
         while True:
             with worker_lock:
                 logger.info("Starting density processing cycle")
@@ -499,14 +418,12 @@ def fetch_image_size(camera_id):
 @app.route('/live-densities')
 def get_live_densities():
     try:
-        density = download_json_from_drive(OUTPUT_JSON_FILE)
-        if not density:
-            return jsonify({"error": "No density data available", "message": "Wait for first cycle"}), 404
+        density = fetch_and_process_densities()
         density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         density["next_update_in"] = f"{int((last_density_update + timedelta(seconds=30) - datetime.now()).total_seconds())} seconds" if last_density_update else "Updating now..."
         return jsonify(density)
     except Exception as e:
-        logger.error(f"Error reading live density: {e}")
+        logger.error(f"Error generating live densities: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/camera-status')
@@ -527,10 +444,6 @@ def check_camera_status():
 
 # Startup
 if __name__ == "__main__":
-    init_google_drive()
-    if drive_service is None:
-        logger.error("Google Drive initialization failed")
-        exit(1)
     if USE_MODELS:
         load_models()
     threading.Thread(target=density_worker, daemon=True).start()
