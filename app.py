@@ -60,7 +60,7 @@ def load_dependencies():
             return False
     return True
 
-def fetch_camera_image(camera_id):
+def fetch_camera_image_size(camera_id):
     if not load_dependencies():
         return {"success": False, "error": "Failed to load dependencies"}
     try:
@@ -84,19 +84,20 @@ def fetch_camera_image(camera_id):
         try:
             response = _session.get(url, timeout=15)
             response.raise_for_status()
-            if response.content and len(response.content) > 100:
+            if response.content:
                 content_type = response.headers.get('Content-Type', '').lower()
                 if 'image' in content_type:
-                    logger.info(f"Successfully fetched image for camera {camera_id}")
-                    return {"success": True, "message": f"Image fetched for camera {camera_id}"}
+                    image_size = len(response.content)
+                    logger.info(f"Successfully fetched image for camera {camera_id}, size: {image_size} bytes")
+                    return {"success": True, "camera_id": camera_id, "image_size_bytes": image_size}
+            logger.error(f"Failed to fetch valid image for {camera_id}")
+            return {"success": False, "error": "Failed to fetch valid image"}
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error for {url}: {e}")
             return {"success": False, "error": f"HTTP error: {str(e)}"}
         except Exception as e:
             logger.error(f"Error fetching image for {camera_id}: {e}")
             return {"success": False, "error": f"Error fetching image: {str(e)}"}
-        logger.error(f"Failed to fetch valid image for {camera_id}")
-        return {"success": False, "error": "Failed to fetch valid image"}
     except Exception as e:
         logger.error(f"Critical error fetching camera image for {camera_id}: {e}")
         return {"success": False, "error": f"Critical error: {str(e)}"}
@@ -106,12 +107,12 @@ def index():
     return jsonify({
         "status": "running",
         "version": "1.0",
-        "message": "Image Fetch Test Service is operational"
+        "message": "Image Fetch Size Test Service is operational"
     })
 
-@app.route('/fetch/<camera_id>')
-def fetch_image(camera_id):
-    result = fetch_camera_image(camera_id)
+@app.route('/fetch-size/<camera_id>')
+def fetch_image_size(camera_id):
+    result = fetch_camera_image_size(camera_id)
     return jsonify(result)
 
 if __name__ == "__main__":
