@@ -1,16 +1,22 @@
 import os
+import json
+import time
 import logging
-import requests
+import threading
+from datetime import datetime, timedelta
+from flask import Flask, jsonify
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import io
 import cv2
 import numpy as np
 import tensorflow as tf
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-from flask import Flask, jsonify
-from datetime import datetime
+import requests
 import gc
-import threading
 
 # Initialize Flask
 app = Flask(__name__)
@@ -19,16 +25,34 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Camera URLs for A and B
-camera_urls = {
-    'A': "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id=6623e7076f998a001b2523ea&bg=black&w=300&h=230",
-    'B': "https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id=5deb576d1dc17d7c5515acf8&bg=black&w=300&h=230"
-}
+# Google Drive setup
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+CLIENT_ID = os.environ.get('GOOGLE_DRIVE_CLIENT_ID')
+CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET')
+REFRESH_TOKEN = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN')
+FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+OUTPUT_JSON_FILE = "densities.json"
 
-# Warm-up URL
-warmup_url = "https://giaothong.hochiminhcity.gov.vn/"
+# Camera configurations
+camera_websites = [
+    {'id': 'A', 'camId': '6623e7076f998a001b2523ea', 'title': 'Lý Thái Tổ - Sư Vạn Hạnh'},
+    {'id': 'B', 'camId': '5deb576d1dc17d7c5515acf8', 'title': '3/2 – Cao Thắng'},
+    {'id': 'C', 'camId': '63ae7a9cbfd3d90017e8f303', 'title': 'Điện Biên Phủ - Cao Thắng'},
+    {'id': 'D', 'camId': '5deb576d1dc17d7c5515ad21', 'title': 'Ngã sáu Nguyễn Tri Phương 1'},
+    {'id': 'E', 'camId': '5deb576d1dc17d7c5515ad22', 'title': 'Ngã sáu Nguyễn Tri Phương'},
+    {'id': 'F', 'camId': '5d8cdd26766c880017188974', 'title': 'Lê Đại Hành 2'},
+    {'id': 'G', 'camId': '63ae763bbfd3d90017e8f0c4', 'title': 'Lý Thái Tổ - Nguyễn Đình Chiểu'},
+    {'id': 'H', 'camId': '5deb576d1dc17d7c5515acf6', 'title': 'Ngã sáu Cộng hòa 1'},
+    {'id': 'I', 'camId': '5deb576d1dc17d7c5515acf7', 'title': 'Ngã sáu Cộng Hòa'},
+    {'id': 'J', 'camId': '5deb576d1dc17d7c5515acf2', 'title': 'Điện Biên Phủ - CMT8'},
+    {'id': 'K', 'camId': '5deb576d1dc17d7c5515acf9', 'title': 'Nút giao Công Trường Dân Chủ'},
+    {'id': 'L', 'camId': '5deb576d1dc17d7c5515acfa', 'title': 'Nút giao Công Trường Dân Chủ 1'}
+]
 
-# Headers
+CAMERA_URL_TEMPLATE = 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camId}&bg=black&w=300&h=230'
+WARMUP_URL = "https://giaothong.hochiminhcity.gov.vn/"
+
+# Headers for requests
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
     "Accept": "image/jpeg,image/png,image/*,*/*;q=0.8",
@@ -39,14 +63,108 @@ headers = {
     "Origin": "https://giaothong.hochiminhcity.gov.vn"
 }
 
-# Lazy-load dependencies
+# Global variables
+drive_service = None
 _session = None
-_tf, _cv2, _np, _torch, _transforms, _road_model, _vehicle_model = [None] * 7
+_tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model = [None] * 8
+USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
+last_density_update = None
 DEVICE = 'cpu'
 worker_lock = threading.Lock()
-last_density_update = None
 
-# MiniUNet architecture
+# Parse camera data
+cameras = [(c['id'], c['title']) for c in camera_websites]
+camera_mapping = {c['id']: c['title'] for c in camera_websites}
+logger.info(f"Parsed cameras: {cameras}")
+
+# Google Drive initialization
+def init_google_drive():
+    global drive_service
+    try:
+        creds = Credentials(
+            None,
+            refresh_token=REFRESH_TOKEN,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES,
+            token_uri="https://oauth2.googleapis.com/token"
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+        logger.info("Google Drive service initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Drive: {e}")
+        drive_service = None
+
+def get_file_id(filename):
+    try:
+        query = f"'{FOLDER_ID}' in parents and name = '{filename}' and trashed = false"
+        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get('files', [])
+        return files[0]['id'] if files else None
+    except Exception as e:
+        logger.error(f"Error finding file {filename}: {e}")
+        return None
+
+def upload_json_to_drive(filename, data):
+    try:
+        temp_file = f"/tmp/{filename}"
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        file_id = get_file_id(filename)
+        media = MediaFileUpload(temp_file, mimetype='application/json')
+        if file_id:
+            drive_service.files().update(fileId=file_id, media_body=media).execute()
+            logger.info(f"Updated {filename} in Google Drive")
+        else:
+            file_metadata = {'name': filename, 'parents': [FOLDER_ID], 'mimeType': 'application/json'}
+            drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            logger.info(f"Uploaded {filename} to Google Drive")
+        os.remove(temp_file)
+    except Exception as e:
+        logger.error(f"Error uploading {filename}: {e}")
+
+def download_json_from_drive(filename):
+    try:
+        file_id = get_file_id(filename)
+        if not file_id:
+            logger.warning(f"File {filename} not found")
+            return None
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        fh.seek(0)
+        data = json.loads(fh.read().decode('utf-8'))
+        logger.info(f"Downloaded {filename} from Google Drive")
+        return data
+    except Exception as e:
+        logger.error(f"Error downloading {filename}: {e}")
+        return None
+
+# Dependency and model loading
+def load_dependencies():
+    global _tf, _cv2, _np, _requests, _torch, _transforms, _session
+    if _tf is None:
+        try:
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+            import tensorflow as tf
+            import cv2
+            import numpy as np
+            import requests
+            import torch
+            import torchvision.transforms as transforms
+            _tf, _cv2, _np, _requests, _torch, _transforms = tf, cv2, np, requests, torch, transforms
+            _session = _requests.Session()
+            _session.headers.update(headers)
+            logger.info("Dependencies loaded")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load dependencies: {e}")
+            return False
+    return True
+
 class MiniUNet(nn.Module):
     def __init__(self, in_channels=3, out_channels=1):
         super(MiniUNet, self).__init__()
@@ -79,42 +197,14 @@ class MiniUNet(nn.Module):
         dec1 = self.dec1(dec1)
         return torch.sigmoid(self.final_conv(dec1))
 
-def load_dependencies():
-    global _tf, _cv2, _np, _requests, _torch, _transforms, _session
-    if _tf is None:
-        try:
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-            import tensorflow as tf
-            import cv2
-            import numpy as np
-            import requests
-            import torch
-            import torchvision.transforms as transforms
-            _tf, _cv2, _np, _requests, _torch, _transforms = tf, cv2, np, requests, torch, transforms
-            _session = _requests.Session()
-            _session.headers.update(headers)
-            logger.info("Dependencies loaded successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to load dependencies: {e}")
-            return False
-    return True
-
 def load_models():
     global _road_model, _vehicle_model
     if not load_dependencies():
         logger.error("Failed to load dependencies")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
-    road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")
     vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
-    logger.info(f"Checking model paths: Road={road_model_path}, Vehicle={vehicle_model_path}")
-    if not os.path.exists(road_model_path):
-        logger.error("Road model file not found")
-        return False
-    if not os.path.exists(vehicle_model_path):
-        logger.error("Vehicle model file not found")
-        return False
     try:
         logger.info("Loading road segmentation model...")
         _road_model = _tf.keras.models.load_model(road_model_path)
@@ -131,53 +221,57 @@ def load_models():
     finally:
         gc.collect()
 
+# Image fetching
 def fetch_camera_image(camera_id):
     if not load_dependencies():
-        logger.error(f"Failed to load dependencies for camera {camera_id}")
-        return None, 0
+        return None
     try:
-        logger.info(f"Sending warm-up request for camera {camera_id}")
-        warmup_response = _session.get(warmup_url, timeout=15)
+        # Warm-up request
+        warmup_response = _session.get(WARMUP_URL, timeout=15)
         warmup_response.raise_for_status()
-        logger.info(f"Warm-up request successful for camera {camera_id}: Status {warmup_response.status_code}")
-        
-        url = camera_urls.get(camera_id)
-        if not url:
-            logger.error(f"Camera {camera_id} not found in camera_urls")
-            return None, 0
-        
-        logger.info(f"Fetching image for camera {camera_id} from {url}")
-        response = _session.get(url, timeout=15)
-        logger.info(f"Response status for camera {camera_id}: {response.status_code}, Content length: {len(response.content)} bytes")
-        
-        if response.status_code == 200 and len(response.content) > 100:
-            content_type = response.headers.get('Content-Type', '').lower()
-            logger.info(f"Content-Type for camera {camera_id}: {content_type}")
-            if 'image' in content_type:
-                image_array = _np.asarray(bytearray(response.content), dtype=_np.uint8)
-                image = _cv2.imdecode(image_array, _cv2.IMREAD_COLOR)
-                if image is not None and image.size > 0:
-                    image_size = len(response.content)
-                    logger.info(f"Successfully fetched and decoded image for camera {camera_id}, size: {image_size} bytes")
-                    return image, image_size
-                logger.warning(f"Failed to decode image for camera {camera_id}")
-                return None, 0
-            logger.warning(f"Unexpected Content-Type for camera {camera_id}: {content_type}")
-            return None, 0
-        logger.error(f"Failed to fetch image for camera {camera_id}: Status {response.status_code}")
-        return None, 0
+        logger.info(f"Warm-up request successful: {warmup_response.status_code}")
+
+        # Find camera
+        camera = next((c for c in camera_websites if c['id'] == camera_id), None)
+        if not camera:
+            logger.error(f"Camera {camera_id} not found")
+            return None
+
+        # Fetch image
+        url = CAMERA_URL_TEMPLATE.format(camId=camera['camId'])
+        for attempt in range(3):
+            try:
+                response = _session.get(url, timeout=15)
+                response.raise_for_status()
+                if len(response.content) > 100:
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'image' in content_type:
+                        image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+                        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                        if image is not None and image.size > 0:
+                            logger.info(f"Fetched image for {camera_id}")
+                            return image
+                        logger.warning(f"Failed to decode image for {camera_id} (attempt {attempt+1}/3)")
+                    else:
+                        logger.warning(f"Unexpected Content-Type: {content_type} (attempt {attempt+1}/3)")
+                else:
+                    logger.warning(f"Empty response for {camera_id} (attempt {attempt+1}/3)")
+            except Exception as e:
+                logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
+            time.sleep(1)
+        logger.error(f"Failed to fetch image for {camera_id} after 3 attempts")
+        return None
     except Exception as e:
-        logger.error(f"Error fetching image for camera {camera_id}: {e}")
-        return None, 0
+        logger.error(f"Critical error fetching image for {camera_id}: {e}")
+        return None
     finally:
         gc.collect()
 
+# Image processing (from second code, unchanged except for imports)
 def preprocess_image(img):
     if not load_dependencies() or img is None:
-        logger.error("Failed to preprocess image: Dependencies not loaded or image is None")
         return None, None
     try:
-        logger.info("Preprocessing image")
         img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
         y, cr, cb = _cv2.split(img_road)
         clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
@@ -196,139 +290,182 @@ def preprocess_image(img):
         img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
         img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
         
-        logger.info("Image preprocessing completed")
         return img_road, img_vehicle
-    except Exception as e:
-        logger.error(f"Error preprocessing image: {e}")
-        return None, None
     finally:
         gc.collect()
 
 def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=500):
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
     if not significant_blobs:
-        logger.info("No significant blobs found for vehicle counting")
         return 0, 0
-    
-    sizes = _np.array(significant_blobs)
-    q20 = _np.percentile(sizes, 20)
-    single_vehicle_blobs = sizes[sizes <= q20]
-    avg_single_vehicle = _np.median(single_vehicle_blobs) if len(single_vehicle_blobs) > 0 else 200
-    avg_single_vehicle = max(200, min(avg_single_vehicle, 1500))
-    
-    vehicle_count = sum(max(1, int(size / avg_single_vehicle)) for size in significant_blobs)
-    logger.info(f"Estimated vehicle count: {vehicle_count}, avg vehicle size: {avg_single_vehicle}")
-    return int(vehicle_count), int(avg_single_vehicle)
+    def find_vehicle_unit_size(sizes):
+        sizes = sorted(sizes)
+        smallest_blob = min(sizes)
+        if smallest_blob > 1500:
+            return 200
+        q5, q95 = _np.percentile(sizes, [5, 95])
+        filtered_sizes = [s for s in sizes if q5 <= s <= q95]
+        if not filtered_sizes:
+            filtered_sizes = sizes
+        single_vehicle_candidates = [s for s in filtered_sizes if s <= _np.percentile(filtered_sizes, 25)]
+        unit_size = _np.median(single_vehicle_candidates) if single_vehicle_candidates and min(single_vehicle_candidates) <= 1200 else 200
+        return max(500, min(unit_size, 1800))
+    unit_vehicle_size = find_vehicle_unit_size(significant_blobs)
+    total_vehicles = sum(1 if blob_size < unit_vehicle_size * 1.2 else max(1, int(blob_size / unit_vehicle_size)) for blob_size in significant_blobs)
+    return int(total_vehicles), int(unit_vehicle_size)
 
-def analyze_image(image, camera_id):
-    if not load_dependencies() or image is None:
-        logger.error(f"Cannot analyze image for camera {camera_id}: Dependencies or image missing")
-        return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
-    if _road_model is None or _vehicle_model is None:
-        logger.error(f"Cannot analyze image for camera {camera_id}: Models not loaded")
-        return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
+def apply_greenshields_model(vehicle_count, road_area_pixels, image_shape):
+    if road_area_pixels == 0 or vehicle_count == 0:
+        return 0, 0, "No Traffic"
+    image_area = image_shape[0] * image_shape[1]
+    road_ratio = road_area_pixels / image_area
+    density_metric = vehicle_count / (road_ratio * 1000)
+    free_flow_speed = 60
+    jam_density = 80
+    speed_ratio = max(0, 1 - (density_metric / jam_density)) if jam_density > 0 else 0
+    estimated_speed = free_flow_speed * speed_ratio
+    if density_metric < 10:
+        traffic_level = "Free Flow"
+    elif density_metric < 25:
+        traffic_level = "Light Traffic"
+    elif density_metric < 50:
+        traffic_level = "Moderate Traffic"
+    elif density_metric < 70:
+        traffic_level = "Heavy Traffic"
+    else:
+        traffic_level = "Congested"
+    return estimated_speed, density_metric, traffic_level
+
+def analyze_image(image):
+    if not load_dependencies() or image is None or _road_model is None or _vehicle_model is None:
+        return {
+            "density": 0.0,
+            "vehicle_count": 0,
+            "avg_vehicle_size": 0,
+            "density_metric": 0.0,
+            "estimated_speed": 0.0,
+            "traffic_level": "No Traffic"
+        }
     try:
-        logger.info(f"Analyzing image for camera {camera_id}")
         img_road, img_vehicle = preprocess_image(image)
         if img_road is None or img_vehicle is None:
-            logger.error(f"Preprocessing failed for camera {camera_id}")
-            return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
-        
+            return {
+                "density": 0.0,
+                "vehicle_count": 0,
+                "avg_vehicle_size": 0,
+                "density_metric": 0.0,
+                "estimated_speed": 0.0,
+                "traffic_level": "No Traffic"
+            }
         # Road segmentation
-        logger.info(f"Performing road segmentation for camera {camera_id}")
         road_pred = _road_model.predict(img_road, verbose=0)
         road_mask = (road_pred.squeeze() > 0.5).astype(_np.uint8)
         road_mask_resized = _cv2.resize(road_mask, (image.shape[1], image.shape[0]), interpolation=_cv2.INTER_NEAREST)
-        road_pixels = _np.count_nonzero(road_mask_resized)
-        logger.info(f"Road pixels detected for camera {camera_id}: {road_pixels}")
+        contours, _ = _cv2.findContours(road_mask_resized, _cv2.RETR_EXTERNAL, _cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_contour = max(contours, key=_cv2.contourArea)
+            epsilon = 0.01 * _cv2.arcLength(largest_contour, True)
+            smoothed_contour = _cv2.approxPolyDP(largest_contour, epsilon, True)
+            hull = _cv2.convexHull(smoothed_contour)
+            refined_road_mask = _np.zeros_like(road_mask_resized, dtype=_np.uint8)
+            _cv2.fillPoly(refined_road_mask, [hull], 255)
+        else:
+            refined_road_mask = road_mask_resized.copy()
+        road_pixels = _np.count_nonzero(refined_road_mask)
         
         # Vehicle detection
-        logger.info(f"Performing vehicle detection for camera {camera_id}")
         with _torch.no_grad():
             vehicle_pred = _vehicle_model(img_vehicle)
         vehicle_mask = vehicle_pred.squeeze().cpu().numpy()
         vehicle_mask_resized = _cv2.resize(vehicle_mask, (image.shape[1], image.shape[0]))
         binary_vehicle_mask = (vehicle_mask_resized > 0.25).astype(_np.uint8)
         
-        # Calculate vehicle pixels on road
-        road_binary = (road_mask_resized > 0).astype(_np.uint8)
+        road_binary = (refined_road_mask > 0).astype(_np.uint8)
         vehicles_on_road = _np.logical_and(binary_vehicle_mask, road_binary).astype(_np.uint8)
         vehicle_pixels_on_road = _np.count_nonzero(vehicles_on_road)
-        logger.info(f"Vehicle pixels on road for camera {camera_id}: {vehicle_pixels_on_road}")
         
-        # Calculate density
         density_percentage = (vehicle_pixels_on_road / road_pixels * 100) if road_pixels > 0 else 0.0
         density_percentage = round(max(0, min(100, density_percentage)), 1)
         
-        # Vehicle counting
-        logger.info(f"Performing vehicle counting for camera {camera_id}")
-        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, _np.ones((2, 2), _np.uint8), iterations=1)
-        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road_cleaned, _cv2.MORPH_CLOSE, _np.ones((5, 5), _np.uint8), iterations=1)
+        kernel_open = _np.ones((2, 2), _np.uint8)
+        kernel_close = _np.ones((5, 5), _np.uint8)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road, _cv2.MORPH_OPEN, kernel_open, iterations=1)
+        vehicles_on_road_cleaned = _cv2.morphologyEx(vehicles_on_road_cleaned, _cv2.MORPH_CLOSE, kernel_close, iterations=1)
         
         num_labels, _, stats, _ = _cv2.connectedComponentsWithStats(vehicles_on_road_cleaned, connectivity=8)
         blob_sizes = [stats[i, _cv2.CC_STAT_AREA] for i in range(1, num_labels) if 500 <= stats[i, _cv2.CC_STAT_AREA] <= 8000]
         
-        vehicle_count, avg_vehicle_size = estimate_vehicle_count_from_blobs(blob_sizes)
+        estimated_vehicle_count, avg_vehicle_size = estimate_vehicle_count_from_blobs(blob_sizes)
+        estimated_speed, density_metric, traffic_level = apply_greenshields_model(estimated_vehicle_count, road_pixels, image.shape)
         
-        logger.info(f"Analysis complete for camera {camera_id}: density={density_percentage}%, vehicles={vehicle_count}")
+        logger.info(f"Calculated density: {density_percentage}%, vehicles: {estimated_vehicle_count}, speed: {estimated_speed:.1f} km/h, traffic: {traffic_level}")
         return {
             "density": density_percentage,
-            "vehicle_count": vehicle_count,
-            "avg_vehicle_size": avg_vehicle_size
+            "vehicle_count": estimated_vehicle_count,
+            "avg_vehicle_size": avg_vehicle_size,
+            "density_metric": round(density_metric, 2),
+            "estimated_speed": round(estimated_speed, 1),
+            "traffic_level": traffic_level
         }
     except Exception as e:
-        logger.error(f"Error analyzing image for camera {camera_id}: {e}")
-        return {"density": 0.0, "vehicle_count": 0, "avg_vehicle_size": 0}
+        logger.error(f"Error analyzing image: {e}")
+        return {
+            "density": 0.0,
+            "vehicle_count": 0,
+            "avg_vehicle_size": 0,
+            "density_metric": 0.0,
+            "estimated_speed": 0.0,
+            "traffic_level": "No Traffic"
+        }
     finally:
         gc.collect()
 
+# Density processing
 def fetch_and_process_densities():
     global last_density_update
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     last_density_update = datetime.now()
     results = {"timestamp": timestamp_str, "cameras": {}}
-    
-    for camera_id in ['A', 'B']:
+    success_count, failure_count = 0, 0
+    for camera_id, camera_name in cameras:
         try:
-            logger.info(f"Processing camera {camera_id}")
-            image, image_size = fetch_camera_image(camera_id)
+            logger.info(f"Processing camera {camera_name} (ID: {camera_id})")
+            image = fetch_camera_image(camera_id)
             density_data = {
-                "name": f"Camera {camera_id}",
+                "name": camera_name,
                 "density": 0.0,
                 "vehicle_count": 0,
                 "avg_vehicle_size": 0,
-                "image_size_bytes": image_size,
+                "density_metric": 0.0,
+                "estimated_speed": 0.0,
+                "traffic_level": "No Traffic",
                 "timestamp": timestamp_str
             }
             if image is None:
-                logger.warning(f"Image fetch failed for Camera {camera_id}")
-                density_data["error"] = "Failed to fetch image"
+                failure_count += 1
+                logger.warning(f"Image fetch failed for {camera_name}")
+                results["cameras"][camera_id] = {**density_data, "error": "Failed to fetch image"}
             else:
-                analysis_result = analyze_image(image, camera_id)
+                success_count += 1
+                analysis_result = analyze_image(image)
                 density_data.update(analysis_result)
-                density_data["image_size_bytes"] = image_size
-            results["cameras"][camera_id] = density_data
-            logger.info(f"Processed Camera {camera_id}: density={density_data['density']}%, vehicles={density_data['vehicle_count']}, image_size={image_size} bytes")
+                results["cameras"][camera_id] = density_data
+            logger.info(f"Processed camera {camera_name}: density={density_data['density']}%")
         except Exception as e:
-            logger.error(f"Error processing Camera {camera_id}: {e}")
-            results["cameras"][camera_id] = {
-                "name": f"Camera {camera_id}",
-                "density": 0.0,
-                "vehicle_count": 0,
-                "avg_vehicle_size": 0,
-                "image_size_bytes": 0,
-                "timestamp": timestamp_str,
-                "error": str(e)
-            }
+            failure_count += 1
+            logger.error(f"Error processing camera {camera_name}: {e}")
+            results["cameras"][camera_id] = {**density_data, "error": str(e)}
         finally:
             gc.collect()
+    logger.info(f"Processing complete. Success: {success_count}, Failure: {failure_count}")
+    if drive_service:
+        upload_json_to_drive(OUTPUT_JSON_FILE, results)
     return results
 
 def density_worker():
-    logger.info("Density worker started - running every 30 seconds")
+    logger.info("Density worker started")
     try:
-        if not load_models():
-            logger.error("Failed to load models, worker will return zero densities and vehicle counts")
+        fetch_and_process_densities()
         while True:
             with worker_lock:
                 logger.info("Starting density processing cycle")
@@ -336,88 +473,66 @@ def density_worker():
                 logger.info("Density processing cycle completed")
             time.sleep(30)
     except Exception as e:
-        logger.error(f"Critical error in density worker: {e}")
+        logger.error(f"Error in density worker: {e}")
 
-# Routes
+# Flask routes
 @app.route('/')
 def index():
     return jsonify({
         "status": "running",
         "version": "1.0",
-        "message": "Traffic Analysis Service for Cameras A and B"
+        "message": "Traffic Analysis Service is operational",
+        "using_models": USE_MODELS
     })
 
-@app.route('/densities')
-def get_densities():
+@app.route('/fetch-size/<camera_id>')
+def fetch_image_size(camera_id):
+    image = fetch_camera_image(camera_id)
+    if image is None:
+        return jsonify({"success": False, "error": f"Failed to fetch image for {camera_id}"})
+    return jsonify({
+        "success": True,
+        "camera_id": camera_id,
+        "image_size_bytes": len(_cv2.imencode('.jpg', image)[1]) if image is not None else 0
+    })
+
+@app.route('/live-densities')
+def get_live_densities():
     try:
-        results = fetch_and_process_densities()
-        raw_densities = {
-            camera_id: {
-                "density": data["density"],
-                "vehicle_count": data["vehicle_count"],
-                "image_size_bytes": data["image_size_bytes"],
-                "error": data.get("error", None)
-            } for camera_id, data in results["cameras"].items()
-        }
-        return jsonify(raw_densities)
+        density = download_json_from_drive(OUTPUT_JSON_FILE)
+        if not density:
+            return jsonify({"error": "No density data available", "message": "Wait for first cycle"}), 404
+        density["last_update"] = last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
+        density["next_update_in"] = f"{int((last_density_update + timedelta(seconds=30) - datetime.now()).total_seconds())} seconds" if last_density_update else "Updating now..."
+        return jsonify(density)
     except Exception as e:
-        logger.error(f"Error in densities endpoint: {e}")
+        logger.error(f"Error reading live density: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/camera-status')
 def check_camera_status():
     try:
         results = {"timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "cameras": {}}
-        for camera_id in ['A', 'B']:
-            image, image_size = fetch_camera_image(camera_id)
-            if image is None:
-                results["cameras"][camera_id] = {
-                    "name": f"Camera {camera_id}",
-                    "status": "offline",
-                    "image_size_bytes": 0,
-                    "error": "Failed to fetch image"
-                }
-            else:
-                results["cameras"][camera_id] = {
-                    "name": f"Camera {camera_id}",
-                    "status": "online",
-                    "resolution": f"{image.shape[1]}x{image.shape[0]}",
-                    "image_size_bytes": image_size
-                }
+        for camera_id, camera_name in cameras:
+            image = fetch_camera_image(camera_id)
+            results["cameras"][camera_id] = {
+                "name": camera_name,
+                "status": "online" if image is not None and image.size > 1000 else "offline",
+                "resolution": f"{image.shape[1]}x{image.shape[0]}" if image is not None and image.size > 1000 else None,
+                "error": None if image is not None else "Failed to fetch image"
+            }
         return jsonify(results)
     except Exception as e:
-        logger.error(f"Error in camera-status endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/debug')
-def debug():
-    try:
-        base_directory = os.environ.get('BASE_DIR', os.getcwd())
-        model_info = {
-            "road_model": {"exists": os.path.exists(os.path.join(base_directory, "unet_road_segmentation (Better).keras"))},
-            "vehicle_model": {"exists": os.path.exists(os.path.join(base_directory, "filtered_model_cpu.pth"))}
-        }
-        model_load_status = {
-            "road_model_loaded": _road_model is not None,
-            "vehicle_model_loaded": _vehicle_model is not None,
-            "dependencies_loaded": _tf is not None and _cv2 is not None and _np is not None and _requests is not None and _torch is not None and _transforms is not None
-        }
-        return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "model_files": model_info,
-            "model_load_status": model_load_status,
-            "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
-        })
-    except Exception as e:
-        logger.error(f"Error in debug endpoint: {e}")
-        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
-
+# Startup
 if __name__ == "__main__":
-    # Start worker thread
-    density_thread = threading.Thread(target=density_worker, daemon=True)
-    density_thread.start()
-    logger.info("Density worker thread started")
-
-    # Run Flask app on Render's PORT
+    init_google_drive()
+    if drive_service is None:
+        logger.error("Google Drive initialization failed")
+        exit(1)
+    if USE_MODELS:
+        load_models()
+    threading.Thread(target=density_worker, daemon=True).start()
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
