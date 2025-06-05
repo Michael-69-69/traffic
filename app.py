@@ -137,6 +137,7 @@ worker_lock = threading.Lock()
 
 # Remove model definitions to save memory (re-added only if USE_MODELS is True)
 if USE_MODELS:
+    import torch.nn as nn  # Added explicit import for nn
     class MiniUNet(nn.Module):
         def __init__(self, in_channels=3, out_channels=1):
             super(MiniUNet, self).__init__()
