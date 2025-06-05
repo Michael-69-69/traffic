@@ -86,30 +86,25 @@ def fetch_camera_image(camera_id):
 
         url = CAMERA_URL_TEMPLATE.format(camera_id=cam_id)
         logger.info(f"Fetching image from primary URL: {url}")
-        for attempt in range(3):
-            try:
-                response = _session.get(url, timeout=15)
-                response.raise_for_status()
-                if response.content and len(response.content) > 100:
-                    content_type = response.headers.get('Content-Type', '').lower()
-                    if 'image' in content_type:
-                        image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
-                        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-                        if image is not None and image.size > 0:
-                            logger.info(f"Successfully fetched and decoded image for camera {camera_id}")
-                            return image
-                        logger.warning(f"Failed to decode image from {url} (attempt {attempt+1}/3)")
-                    else:
-                        logger.warning(f"Unexpected Content-Type: {content_type}")
+        try:
+            response = _session.get(url, timeout=15)
+            response.raise_for_status()
+            if response.content and len(response.content) > 100:
+                content_type = response.headers.get('Content-Type', '').lower()
+                if 'image' in content_type:
+                    image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+                    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                    if image is not None and image.size > 0:
+                        logger.info(f"Successfully fetched and decoded image for camera {camera_id}")
+                        return image
+                    logger.warning(f"Failed to decode image from {url}")
                 else:
-                    logger.warning(f"Empty or invalid response from {url} (attempt {attempt+1}/3)")
-            except requests.exceptions.HTTPError as e:
-                logger.error(f"HTTP error for {url}: {e} (attempt {attempt+1}/3)")
-                break
-            except Exception as e:
-                logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
-            time.sleep(1)
-        logger.error(f"Failed to fetch valid image for {camera_id} after 3 attempts")
+                    logger.warning(f"Unexpected Content-Type: {content_type}")
+            else:
+                logger.warning(f"Empty or invalid response from {url}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching image for {camera_id}: {e}")
+        logger.error(f"Failed to fetch valid image for {camera_id}")
         return None
     except Exception as e:
         logger.error(f"Critical error fetching camera image for {camera_id}: {e}")
@@ -147,7 +142,6 @@ def analyze_image(image):
             "traffic_level": "No Traffic"
         }
     try:
-        # Simple vehicle detection using blob analysis (no models yet)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
         kernel_open = np.ones((2, 2), np.uint8)
@@ -155,17 +149,14 @@ def analyze_image(image):
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
         num_labels, _, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
-        blob_sizes = [stats[i, cv2.CC_STAT_AREA] for i in range(1, num_labels) if min_reasonable_blob <= stats[i, cv2.CC_STAT_AREA] <= max_reasonable_blob]
-        min_reasonable_blob = 500
-        max_reasonable_blob = 8000
+        blob_sizes = [stats[i, cv2.CC_STAT_AREA] for i in range(1, num_labels) if 500 <= stats[i, cv2.CC_STAT_AREA] <= 8000]
 
         if blob_sizes:
             vehicle_count, avg_vehicle_size = estimate_vehicle_count_from_blobs(blob_sizes)
         else:
             vehicle_count, avg_vehicle_size = 0, 0
 
-        # Road area (simplified, no segmentation model yet)
-        road_area_pixels = image.shape[0] * image.shape[1]  # Placeholder; full app uses road_mask
+        road_area_pixels = image.shape[0] * image.shape[1]  # Placeholder
         estimated_speed, density_metric, traffic_level = apply_greenshields_model(vehicle_count, road_area_pixels, image.shape)
         density_percentage = (vehicle_count / (road_area_pixels / 100)) if road_area_pixels > 0 else 0.0
         density_percentage = round(max(0, min(100, density_percentage)), 1)
