@@ -137,7 +137,7 @@ worker_lock = threading.Lock()
 
 # Remove model definitions to save memory (re-added only if USE_MODELS is True)
 if USE_MODELS:
-    import torch.nn as nn  # Added explicit import for nn
+    import torch.nn as nn
     class MiniUNet(nn.Module):
         def __init__(self, in_channels=3, out_channels=1):
             super(MiniUNet, self).__init__()
@@ -176,7 +176,7 @@ def load_dependencies():
         try:
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
             os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-            os.environ['TF_MEMORY_ALLOCATION'] = '128MB'  # Reduced to 128MB
+            os.environ['TF_MEMORY_ALLOCATION'] = '64MB'  # Reduced further to 64MB
             import tensorflow as tf
             import cv2
             import numpy as np
@@ -213,7 +213,7 @@ def load_models():
         logger.error("Failed to load dependencies - cannot load models")
         return False
     base_directory = os.environ.get('BASE_DIR', os.getcwd())
-    road_model_path = os.path.join(base_directory, "unet_road_segmentation (Better).keras")
+    road_model_path = os.path.join(base_directory, "unet_road_segmentation.keras")  # Updated to correct file name
     vehicle_model_path = os.path.join(base_directory, "filtered_model_cpu.pth")
     logger.info(f"Checking for model files: Road: {os.path.exists(road_model_path)}, Vehicle: {os.path.exists(vehicle_model_path)}")
     try:
@@ -481,6 +481,7 @@ def fetch_and_process_densities():
 
 def density_worker():
     logger.info("Density worker initialized - running every 60 seconds")
+    time.sleep(10)  # Initial delay to stabilize
     try:
         logger.info("Starting initial density calculation")
         fetch_and_process_densities()
