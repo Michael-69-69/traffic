@@ -408,3 +408,16 @@ def debug():
             "model_load_status": model_load_status,
             "last_density_update": last_density_update.strftime('%Y-%m-%d %H:%M:%S') if last_density_update else None
         })
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        return jsonify({"error": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}), 500
+
+if __name__ == "__main__":
+    # Start worker thread
+    density_thread = threading.Thread(target=density_worker, daemon=True)
+    density_thread.start()
+    logger.info("Density worker thread started")
+
+    # Run Flask app on Render's PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
