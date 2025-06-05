@@ -16,11 +16,12 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import requests
+import gc
 
 # Initialize Flask
 app = Flask(__name__)
 
-# Set up logging with INFO level (reverted from DEBUG)
+# Set up logging with INFO level
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -121,68 +122,20 @@ def download_json_from_drive(filename):
         logger.error(f"Error downloading {filename} from Google Drive: {e}")
         return None
 
-# Camera websites list
+# Camera websites list (unchanged)
 camera_websites = [
-    {
-        'id': 'A',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lý Thái Tổ - Sư Vạn Hạnh'
-    },
-    {
-        'id': 'B',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': '3/2 – Cao Thắng'
-    },
-    {
-        'id': 'C',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Điện Biên Phủ - Cao Thắng'
-    },
-    {
-        'id': 'D',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Nguyễn Tri Phương 1'
-    },
-    {
-        'id': 'E',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Nguyễn Tri Phương'
-    },
-    {
-        'id': 'F',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lê Đại Hành 2'
-    },
-    {
-        'id': 'G',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Lý Thái Tổ - Nguyễn Đình Chiểu'
-    },
-    {
-        'id': 'H',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Cộng hòa 1'
-    },
-    {
-        'id': 'I',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera& primesVideoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Ngã sáu Cộng Hòa'
-    },
-    {
-        'id': 'J',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A9%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Điện Biên Phủ - CMT8'
-    },
-    {
-        'id': 'K',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Nút giao Công Trường Dân Chủ'
-    },
-    {
-        'id': 'L',
-        'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8',
-        'title': 'Nút giao Công Trường Dân Chủ 1'
-    }
+    {'id': 'A', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=6623e7076f998a001b2523ea&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20S%C6%B0%20V%E1%BA%A1n%20H%E1%BA%A1nh&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Lý Thái Tổ - Sư Vạn Hạnh'},
+    {'id': 'B', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf8&camLocation=Ba%20Th%C3%A1ng%20Hai%20-%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': '3/2 – Cao Thắng'},
+    {'id': 'C', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae7a9cbfd3d90017e8f303&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A7%20%E2%80%93%20Cao%20Th%E1%BA%AFng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Điện Biên Phủ - Cao Thắng'},
+    {'id': 'D', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad21&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Ngã sáu Nguyễn Tri Phương 1'},
+    {'id': 'E', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515ad22&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20Nguy%E1%BB%85n%20Tri%20Ph%C6%B0%C6%A1ng&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Ngã sáu Nguyễn Tri Phương'},
+    {'id': 'F', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5d8cdd26766c880017188974&camLocation=N%C3%BUt%20giao%20L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh%202%20(L%C3%AA%20%C4%90%E1%BA%A1i%20H%C3%A0nh)&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Lê Đại Hành 2'},
+    {'id': 'G', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=63ae763bbfd3d90017e8f0c4&camLocation=L%C3%BD%20Th%C3%A1i%20T%E1%BB%95%20-%20Nguy%E1%BB%85n%20%C4%90%C3%ACnh%20Chi%E1%BB%83u&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Lý Thái Tổ - Nguyễn Đình Chiểu'},
+    {'id': 'H', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf6&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Ngã sáu Cộng hòa 1'},
+    {'id': 'I', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf7&camLocation=N%C3%BAt%20giao%20Ng%C3%A3%20s%C3%A1u%20C%E1%BB%99ng%20H%C3%B2a&camMode=camera& primesVideoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Ngã sáu Cộng Hòa'},
+    {'id': 'J', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf2&camLocation=%C4%90i%E1%BB%87n%20Bi%C3%AAn%20Ph%E1%BB%A9%20-%20C%C3%A1ch%20M%E1%BA%A1ng%20Th%C3%A1ng%20T%C3%A1m&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Điện Biên Phủ - CMT8'},
+    {'id': 'K', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acf9&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Nút giao Công Trường Dân Chủ'},
+    {'id': 'L', 'url': 'http://giaothong.hochiminhcity.gov.vn/expandcameraplayer/?camId=5deb576d1dc17d7c5515acfa&camLocation=N%C3%BAt%20giao%20C%C3%B4ng%20Tr%C6%B0%E1%BB%9Dng%20D%C3%A2n%20Ch%E1%BB%A7&camMode=camera&videoUrl=https://d2zihajmogu5jn.cloudfront.net/bipbop-advanced/bipbop_16x9_variant.m3u8', 'title': 'Nút giao Công Trường Dân Chủ 1'}
 ]
 
 # Parse camera data
@@ -202,7 +155,6 @@ def parse_camera_data():
     logger.info(f"Camera mapping: {camera_mapping}")
     return cameras, camera_mapping
 
-# Generate cameras and mapping
 cameras, camera_mapping = parse_camera_data()
 CAMERA_URL_TEMPLATE = os.environ.get('CAMERA_URL_TEMPLATE', 'https://giaothong.hochiminhcity.gov.vn:8007/Render/CameraHandler.ashx?id={camera_id}&bg=black&w=300&h=230')
 
@@ -211,26 +163,22 @@ _tf, _cv2, _np, _requests, _torch, _transforms, _road_model, _vehicle_model, _se
 USE_MODELS = os.environ.get('USE_MODELS', 'false').lower() == 'true'
 last_density_update = None
 DEVICE = 'cpu'
+worker_lock = threading.Lock()  # Add lock to prevent overlapping worker cycles
 
-# Define MiniUNet architecture
+# Define MiniUNet architecture (unchanged)
 class MiniUNet(nn.Module):
     def __init__(self, in_channels=3, out_channels=1):
         super(MiniUNet, self).__init__()
-        
         self.enc1 = self.mini_block(in_channels, 16)
         self.enc2 = self.mini_block(16, 32)
-        
         self.bottleneck = self.mini_block(32, 64)
-        
         self.upconv2 = nn.ConvTranspose2d(64, 32, 2, stride=2)
         self.dec2 = self.mini_block(64, 32)
-        
         self.upconv1 = nn.ConvTranspose2d(32, 16, 2, stride=2)
         self.dec1 = self.mini_block(32, 16)
-        
         self.final_conv = nn.Conv2d(16, out_channels, 1)
         self.pool = nn.MaxPool2d(2)
-        
+    
     def mini_block(self, in_ch, out_ch):
         return nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
@@ -241,17 +189,13 @@ class MiniUNet(nn.Module):
     def forward(self, x):
         enc1 = self.enc1(x)
         enc2 = self.enc2(self.pool(enc1))
-        
         bottleneck = self.bottleneck(self.pool(enc2))
-        
         dec2 = self.upconv2(bottleneck)
         dec2 = torch.cat([dec2, enc2], dim=1)
         dec2 = self.dec2(dec2)
-        
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat([dec1, enc1], dim=1)
         dec1 = self.dec1(dec1)
-        
         return torch.sigmoid(self.final_conv(dec1))
 
 def load_dependencies():
@@ -274,7 +218,15 @@ def load_dependencies():
             _tf.config.threading.set_intra_op_parallelism_threads(1)
             _tf.config.threading.set_inter_op_parallelism_threads(1)
             _session = _requests.Session()
-            _session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"})
+            _session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                "Accept": "image/jpeg,image/png,image/*,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Referer": "https://giaothong.hochiminhcity.gov.vn/",
+                "Origin": "https://giaothong.hochiminhcity.gov.vn"
+            })
             logger.info("Dependencies loaded successfully")
             return True
         except Exception as e:
@@ -316,29 +268,34 @@ def load_models():
         logger.error("MODEL LOADING FAILED")
         logger.error("=============================================")
         return False
+    finally:
+        gc.collect()  # Force garbage collection after model loading
 
 def preprocess_image(img):
     if not load_dependencies() or img is None:
         return None, None
-    img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
-    y, cr, cb = _cv2.split(img_road)
-    clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-    y = clahe.apply(y)
-    enhanced_img = _cv2.merge((y, cr, cb))
-    img_road = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
-    img_road = _cv2.resize(img_road, (128, 128))
-    img_road = img_road.astype('float32') / 255.0
-    img_road = _np.expand_dims(img_road, axis=0)
-    
-    transform = _transforms.Compose([
-        _transforms.ToPILImage(),
-        _transforms.Resize((384, 384)),
-        _transforms.ToTensor(),
-    ])
-    img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
-    img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
-    
-    return img_road, img_vehicle
+    try:
+        img_road = _cv2.cvtColor(img, _cv2.COLOR_BGR2YCrCb)
+        y, cr, cb = _cv2.split(img_road)
+        clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        y = clahe.apply(y)
+        enhanced_img = _cv2.merge((y, cr, cb))
+        img_road = _cv2.cvtColor(enhanced_img, _cv2.COLOR_YCrCb2BGR)
+        img_road = _cv2.resize(img_road, (128, 128))
+        img_road = img_road.astype('float32') / 255.0
+        img_road = _np.expand_dims(img_road, axis=0)
+        
+        transform = _transforms.Compose([
+            _transforms.ToPILImage(),
+            _transforms.Resize((384, 384)),
+            _transforms.ToTensor(),
+        ])
+        img_rgb = _cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)
+        img_vehicle = transform(img_rgb).unsqueeze(0).to(DEVICE)
+        
+        return img_road, img_vehicle
+    finally:
+        gc.collect()  # Clean up memory after preprocessing
 
 def estimate_vehicle_count_from_blobs(blob_sizes, min_blob_size=500):
     significant_blobs = [size for size in blob_sizes if size >= min_blob_size]
@@ -564,6 +521,8 @@ def analyze_image(image):
             "estimated_speed": 0.0,
             "traffic_level": "No Traffic"
         }
+    finally:
+        gc.collect()  # Clean up memory after analysis
 
 def fetch_camera_image(camera_id):
     if not load_dependencies():
@@ -627,10 +586,10 @@ def fetch_camera_image(camera_id):
                     logger.error(f"Status code: {e.response.status_code}")
                     logger.error(f"Response headers: {e.response.headers}")
                     logger.error(f"Response content: {e.response.text[:500]}")
+                break  # Stop retries on HTTP error to save memory
             except Exception as e:
                 logger.error(f"Error fetching image for {camera_id}: {e} (attempt {attempt+1}/3)")
-            time.sleep(2)  # Wait 2 seconds between retries
-
+            time.sleep(1)  # Reduced delay to 1 second
         # Fallback to video URL if available
         if video_url:
             logger.info(f"Falling back to video URL for camera {camera_id}: {video_url}")
@@ -649,12 +608,13 @@ def fetch_camera_image(camera_id):
                 logger.error(f"Error extracting frame from video URL {video_url}: {e}")
         else:
             logger.warning(f"No video URL available for camera {camera_id}")
-
         logger.error(f"Failed to fetch valid image for {camera_id} after 3 attempts")
         return None
     except Exception as e:
         logger.error(f"Critical error fetching camera image for {camera_id}: {e}")
         return None
+    finally:
+        gc.collect()  # Clean up memory after fetch
 
 def fetch_and_process_densities():
     global last_density_update
@@ -701,6 +661,8 @@ def fetch_and_process_densities():
             failure_count += 1
             logger.error(f"Error processing camera {camera_name} (ID: {camera_id}): {e}")
             results["cameras"][camera_id] = density_data
+        finally:
+            gc.collect()  # Clean up memory after each camera
     logger.info(f"Camera processing complete. Success: {success_count}, Failure: {failure_count}")
     try:
         upload_json_to_drive(OUTPUT_JSON_FILE, results)
@@ -716,9 +678,10 @@ def density_worker():
         logger.info("Initial density calculation completed")
         while True:
             try:
-                logger.info("Starting density processing cycle (30-second interval)")
-                fetch_and_process_densities()
-                logger.info("Density processing cycle completed")
+                with worker_lock:  # Ensure only one cycle runs at a time
+                    logger.info("Starting density processing cycle (30-second interval)")
+                    fetch_and_process_densities()
+                    logger.info("Density processing cycle completed")
                 time.sleep(30)
             except Exception as e:
                 logger.error(f"Error in density worker cycle: {e}")
@@ -760,6 +723,7 @@ if __name__ != "__main__":
     else:
         start_worker()
 
+# Flask routes (unchanged)
 @app.route('/')
 def index():
     return jsonify({
@@ -1011,4 +975,4 @@ if __name__ == "__main__":
         exit(1)
     start_worker()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)  # Disable debug mode on Render
